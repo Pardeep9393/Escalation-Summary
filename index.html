@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Escalation Control — SLA Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<style>
+  :root{
+    --bg: #0f1620;
+    --panel: #161f2c;
+    --panel-2: #1c2734;
+    --line: #2a3644;
+    --text: #eef2f6;
+    --muted: #8b98a8;
+    --amber: #ffb020;
+    --green: #2bd4a0;
+    --red: #ff5a5f;
+    --blue: #4fa3ff;
+    --radius: 10px;
+  }
+  *{ box-sizing: border-box; }
+  html,body{ margin:0; padding:0; }
+  body{
+    background: radial-gradient(1200px 600px at 10% -10%, #16202c 0%, var(--bg) 55%) fixed;
+    color: var(--text);
+    font-family: 'Inter', sans-serif;
+    min-height: 100vh;
+    padding: 28px 32px 60px;
+  }
+  .mono{ font-family: 'JetBrains Mono', monospace; }
+  .display{ font-family: 'Barlow Condensed', sans-serif; text-transform: uppercase; letter-spacing: 0.02em; }
+
+  /* Top bar */
+  header{
+    display:flex; justify-content: space-between; align-items: flex-end;
+    flex-wrap: wrap; gap: 18px;
+    padding-bottom: 20px; margin-bottom: 22px;
+    border-bottom: 1px solid var(--line);
+  }
+  .eyebrow{ font-size: 12px; color: var(--amber); letter-spacing: 0.16em; font-weight:600; margin-bottom: 6px; }
+  h1{ font-family:'Barlow Condensed', sans-serif; font-weight:700; text-transform:uppercase; letter-spacing: 0.01em; font-size: 34px; margin:0; }
+  .sub{ color: var(--muted); font-size: 13px; margin-top:4px; }
+
+  .controls{ display:flex; align-items:center; gap: 10px; flex-wrap: wrap; }
+  .controls input{
+    background: var(--panel-2); border:1px solid var(--line); color: var(--text);
+    padding: 9px 12px; border-radius: 8px; font-size: 13px; font-family:'JetBrains Mono',monospace;
+    min-width: 260px;
+  }
+  .controls input:focus{ outline:2px solid var(--blue); outline-offset: 1px; }
+  button{
+    background: var(--blue); color: #071018; border:none; font-weight:600;
+    padding: 10px 16px; border-radius: 8px; cursor:pointer; font-size: 13px;
+    font-family:'Inter',sans-serif;
+  }
+  button:hover{ filter: brightness(1.08); }
+  button:focus-visible, input:focus-visible{ outline:2px solid var(--blue); outline-offset:2px; }
+  .btn-ghost{ background: transparent; border:1px solid var(--line); color: var(--text); }
+  #status{ font-size: 12px; color: var(--muted); margin-top: 6px; }
+  #status.err{ color: var(--red); }
+
+  /* KPI row */
+  .kpis{ display:grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin-bottom: 22px; }
+  .kpi{
+    background: var(--panel); border:1px solid var(--line); border-radius: var(--radius);
+    padding: 18px 18px 14px;
+  }
+  .kpi .label{ font-size: 11px; color: var(--muted); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:8px; }
+  .kpi .value{ font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size: 40px; line-height: 1; }
+  .kpi .value.green{ color: var(--green); }
+  .kpi .value.red{ color: var(--red); }
+  .kpi .value.amber{ color: var(--amber); }
+  .kpi .foot{ font-size: 11px; color: var(--muted); margin-top: 8px; }
+
+  /* Conveyor / signature element */
+  .conveyor-wrap{
+    background: var(--panel); border:1px solid var(--line); border-radius: var(--radius);
+    padding: 20px 22px 22px; margin-bottom: 22px;
+  }
+  .conveyor-title{ display:flex; justify-content: space-between; align-items:baseline; margin-bottom: 16px;}
+  .conveyor-title h2{ font-family:'Barlow Condensed',sans-serif; text-transform:uppercase; font-size:18px; margin:0; letter-spacing:0.03em; }
+  .conveyor-title span{ font-size: 11px; color: var(--muted); }
+  .belt{ position:relative; height: 10px; background: var(--panel-2); border-radius: 6px; overflow:hidden; display:flex; border:1px solid var(--line); }
+  .belt .seg{ height: 100%; }
+  .stages{ display:grid; grid-template-columns: repeat(4,1fr); gap: 14px; margin-top: 16px; }
+  .stage{ border-left: 3px solid var(--line); padding-left: 12px; }
+  .stage .n{ font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size: 30px; line-height:1; }
+  .stage .lbl{ font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+  /* charts row */
+  .grid2{ display:grid; grid-template-columns: 1fr 1.4fr; gap: 16px; margin-bottom: 22px; }
+  .card{ background: var(--panel); border:1px solid var(--line); border-radius: var(--radius); padding: 18px 20px; }
+  .card h2{ font-family:'Barlow Condensed',sans-serif; text-transform:uppercase; font-size:16px; margin:0 0 14px; letter-spacing:0.03em; color: var(--muted); }
+  .chart-box{ position:relative; height: 220px; }
+
+  .bar-row{ display:flex; align-items:center; gap: 10px; margin-bottom: 10px; font-size: 13px; }
+  .bar-row .name{ width: 150px; flex-shrink:0; color: var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .bar-track{ flex:1; background: var(--panel-2); border-radius: 4px; height: 10px; overflow:hidden; }
+  .bar-fill{ height:100%; background: var(--blue); border-radius: 4px; }
+  .bar-row .cnt{ width: 30px; text-align:right; color: var(--muted); font-family:'JetBrains Mono',monospace; font-size:12px; }
+
+  /* table */
+  .table-card{ background: var(--panel); border:1px solid var(--line); border-radius: var(--radius); padding: 18px 20px; }
+  .table-head{ display:flex; justify-content: space-between; align-items:center; margin-bottom: 14px; flex-wrap: wrap; gap: 10px; }
+  .table-head h2{ font-family:'Barlow Condensed',sans-serif; text-transform:uppercase; font-size:16px; margin:0; color: var(--muted); }
+  table{ width:100%; border-collapse: collapse; font-size: 13px; }
+  thead th{
+    text-align:left; font-size: 11px; text-transform:uppercase; letter-spacing:0.05em;
+    color: var(--muted); border-bottom: 1px solid var(--line); padding: 8px 10px; position: sticky; top:0; background: var(--panel);
+  }
+  tbody td{ padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tbody tr:hover{ background: var(--panel-2); }
+  .table-scroll{ max-height: 480px; overflow:auto; }
+  .badge{ display:inline-block; padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight:600; }
+  .badge.match{ background: rgba(43,212,160,0.15); color: var(--green); }
+  .badge.breach{ background: rgba(255,90,95,0.15); color: var(--red); }
+  .badge.pending{ background: rgba(255,176,32,0.15); color: var(--amber); }
+  a.linkcell{ color: var(--blue); text-decoration:none; }
+  a.linkcell:hover{ text-decoration:underline; }
+  .empty-state{ text-align:center; color: var(--muted); padding: 40px 0; font-size: 13px; }
+
+  footer{ margin-top: 24px; text-align:center; color: var(--muted); font-size: 11px; }
+
+  @media (max-width: 1000px){
+    .kpis{ grid-template-columns: repeat(2,1fr); }
+    .stages{ grid-template-columns: repeat(2,1fr); }
+    .grid2{ grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <div class="eyebrow">Warehouse Ops · Escalation Tracker</div>
+    <h1>Escalation Control</h1>
+    <div class="sub">Live SLA read‑out from Google Sheets · sheet tab: <strong>Escalation</strong></div>
+  </div>
+  <div>
+    <div class="controls">
+      <input id="sheetUrl" type="text" placeholder="Paste Google Sheet link here" />
+      <input id="tabName" type="text" placeholder="Tab name" value="Escalation" style="min-width:120px" />
+      <button id="loadBtn">Load</button>
+      <button class="btn-ghost" id="refreshBtn">↻ Refresh</button>
+    </div>
+    <div id="status">Loading…</div>
+  </div>
+</header>
+
+<section class="kpis">
+  <div class="kpi">
+    <div class="label">Total Escalations</div>
+    <div class="value" id="kpiTotal">—</div>
+    <div class="foot">Unique Order IDs</div>
+  </div>
+  <div class="kpi">
+    <div class="label">Pending</div>
+    <div class="value amber" id="kpiPending">—</div>
+    <div class="foot">Upload Date blank</div>
+  </div>
+  <div class="kpi">
+    <div class="label">SLA Match</div>
+    <div class="value green" id="kpiMatch">—</div>
+    <div class="foot">Closed within 48 hrs</div>
+  </div>
+  <div class="kpi">
+    <div class="label">SLA Breach</div>
+    <div class="value red" id="kpiBreach">—</div>
+    <div class="foot">Closed after 48 hrs</div>
+  </div>
+  <div class="kpi">
+    <div class="label">SLA Adherence</div>
+    <div class="value" id="kpiSlaPct">—</div>
+    <div class="foot">Match ÷ (Match + Breach)</div>
+  </div>
+</section>
+
+<section class="conveyor-wrap">
+  <div class="conveyor-title">
+    <h2>Pending Aging Belt</h2>
+    <span>days since received, still open · as of today</span>
+  </div>
+  <div class="belt" id="belt"></div>
+  <div class="stages">
+    <div class="stage" style="border-color: var(--green)">
+      <div class="n" id="ag12">—</div>
+      <div class="lbl">1–2 days</div>
+    </div>
+    <div class="stage" style="border-color: var(--blue)">
+      <div class="n" id="ag35">—</div>
+      <div class="lbl">3–5 days</div>
+    </div>
+    <div class="stage" style="border-color: var(--amber)">
+      <div class="n" id="ag610">—</div>
+      <div class="lbl">6–10 days</div>
+    </div>
+    <div class="stage" style="border-color: var(--red)">
+      <div class="n" id="ag10p">—</div>
+      <div class="lbl">&gt; 10 days</div>
+    </div>
+  </div>
+</section>
+
+<section class="grid2">
+  <div class="card">
+    <h2>SLA Split (Closed Cases)</h2>
+    <div class="chart-box"><canvas id="slaChart"></canvas></div>
+  </div>
+  <div class="card">
+    <h2>By Category &amp; Escalation Reason</h2>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px;">
+      <div>
+        <div class="sub" style="margin-bottom:8px; color:var(--muted); font-size:11px; text-transform:uppercase;">Category</div>
+        <div id="catBars"></div>
+      </div>
+      <div>
+        <div class="sub" style="margin-bottom:8px; color:var(--muted); font-size:11px; text-transform:uppercase;">Escalation Reason</div>
+        <div id="reasonBars"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="table-card">
+  <div class="table-head">
+    <h2>All Escalations</h2>
+    <input id="search" type="text" placeholder="Search order id / reason / category…" style="background:var(--panel-2); border:1px solid var(--line); color:var(--text); padding:8px 12px; border-radius:8px; font-size:13px; min-width:240px;" />
+  </div>
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>Order ID</th>
+          <th>Received</th>
+          <th>Upload Date</th>
+          <th>Status</th>
+          <th>Age / TAT</th>
+          <th>Category</th>
+          <th>Escalation Reason</th>
+          <th>Warehouse Remarks</th>
+          <th>Link</th>
+        </tr>
+      </thead>
+      <tbody id="tblBody"></tbody>
+    </table>
+    <div class="empty-state" id="emptyState" style="display:none;">No matching rows.</div>
+  </div>
+</section>
+
+<footer>Auto-refreshes every 5 minutes · Built for management review · Requires sheet sharing set to "Anyone with the link – Viewer"</footer>
+
+<script>
+let sheetId = '1ZcxxO5Eq4lcDNrFeQCfy-fn4BLY9UW5O93cU0MGwMeY';
+let sheetName = 'Escalation';
+let allRows = [];
+let slaChartInstance = null;
+
+function extractSheetId(url){
+  const m = url.match(/\/d\/([a-zA-Z0-9-_]+)/);
+  return m ? m[1] : null;
+}
+
+function normalize(s){ return (s||'').toString().toLowerCase().replace(/[^a-z0-9]/g,''); }
+
+function setStatus(msg, isErr){
+  const el = document.getElementById('status');
+  el.textContent = msg;
+  el.className = isErr ? 'err' : '';
+}
+
+function parseGvizDate(v){
+  if(v==null) return null;
+  if(typeof v === 'string'){
+    const m = v.match(/^Date\((\d+),(\d+),(\d+)(?:,(\d+),(\d+),(\d+))?\)$/);
+    if(m){
+      return new Date(+m[1], +m[2], +m[3], +(m[4]||0), +(m[5]||0), +(m[6]||0));
+    }
+    const d = new Date(v);
+    if(!isNaN(d)) return d;
+  }
+  return null;
+}
+
+async function fetchTable(id, tab){
+  const url = `https://docs.google.com/spreadsheets/d/${id}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(tab)}`;
+  const res = await fetch(url);
+  if(!res.ok) throw new Error('Could not reach the sheet. Check the link and sharing setting.');
+  const text = await res.text();
+  const m = text.match(/setResponse\(([\s\S]*)\);?\s*$/);
+  if(!m) throw new Error('Sheet is not publicly viewable, or the tab name is wrong.');
+  const json = JSON.parse(m[1]);
+  return json.table;
+}
+
+function cellVal(row, i){
+  if(i==null || !row.c || !row.c[i]) return null;
+  return row.c[i];
+}
+function cellText(row, i){
+  const c = cellVal(row, i);
+  if(!c) return '';
+  return (c.v ?? c.f ?? '').toString().trim();
+}
+
+function buildRows(table){
+  const colMap = {};
+  table.cols.forEach((c,i)=>{ colMap[normalize(c.label)] = i; });
+  const idx = {
+    date: colMap['date'],
+    reason: colMap['escalationreason'],
+    orderId: colMap['orderid'],
+    link: colMap['link'],
+    remarks: colMap['warehouseremarks'],
+    category: colMap['category'],
+    uploadDate: colMap['uploaddate'],
+  };
+  const rows = [];
+  table.rows.forEach(r=>{
+    const dCell = cellVal(r, idx.date);
+    const uCell = cellVal(r, idx.uploadDate);
+    const receivedDate = dCell ? parseGvizDate(dCell.v) : null;
+    const uploadDate = uCell ? parseGvizDate(uCell.v) : null;
+    const orderId = cellText(r, idx.orderId);
+    if(!receivedDate && !orderId) return;
+    rows.push({
+      date: receivedDate,
+      reason: cellText(r, idx.reason),
+      orderId,
+      link: cellText(r, idx.link),
+      remarks: cellText(r, idx.remarks),
+      category: cellText(r, idx.category),
+      uploadDate,
+    });
+  });
+  return rows;
+}
+
+function computeStats(rows){
+  const now = new Date();
+  const uniqueOrders = new Set(rows.map(r=>r.orderId).filter(Boolean));
+  let match=0, breach=0, pending=0;
+  const aging = {b12:0,b35:0,b610:0,b10p:0};
+  const catCounts = {}; const reasonCounts = {};
+  rows.forEach(r=>{
+    if(r.category) catCounts[r.category] = (catCounts[r.category]||0)+1;
+    if(r.reason) reasonCounts[r.reason] = (reasonCounts[r.reason]||0)+1;
+    if(!r.uploadDate){
+      pending++;
+      if(r.date){
+        const days = Math.floor((now - r.date)/86400000);
+        if(days<=2) aging.b12++;
+        else if(days<=5) aging.b35++;
+        else if(days<=10) aging.b610++;
+        else aging.b10p++;
+      }
+    } else if(r.date){
+      const hours = (r.uploadDate - r.date)/3600000;
+      if(hours < 48) match++; else breach++;
+    }
+  });
+  return {total: uniqueOrders.size, match, breach, pending, aging, catCounts, reasonCounts};
+}
+
+function fmtDate(d){
+  if(!d) return '—';
+  return d.toLocaleDateString('en-GB', {day:'2-digit', month:'short', year:'numeric'});
+}
+
+function renderBars(container, counts){
+  container.innerHTML = '';
+  const entries = Object.entries(counts).sort((a,b)=>b[1]-a[1]).slice(0,8);
+  const max = entries.length ? entries[0][1] : 1;
+  if(!entries.length){ container.innerHTML = '<div style="color:var(--muted); font-size:12px;">No data</div>'; return; }
+  entries.forEach(([name,count])=>{
+    const row = document.createElement('div');
+    row.className = 'bar-row';
+    row.innerHTML = `<div class="name" title="${name}">${name}</div>
+      <div class="bar-track"><div class="bar-fill" style="width:${(count/max*100).toFixed(0)}%"></div></div>
+      <div class="cnt">${count}</div>`;
+    container.appendChild(row);
+  });
+}
+
+function renderBelt(aging){
+  const total = aging.b12+aging.b35+aging.b610+aging.b10p || 1;
+  const belt = document.getElementById('belt');
+  belt.innerHTML = '';
+  const segs = [
+    {n: aging.b12, color: 'var(--green)'},
+    {n: aging.b35, color: 'var(--blue)'},
+    {n: aging.b610, color: 'var(--amber)'},
+    {n: aging.b10p, color: 'var(--red)'},
+  ];
+  segs.forEach(s=>{
+    const div = document.createElement('div');
+    div.className = 'seg';
+    div.style.width = (s.n/total*100)+'%';
+    div.style.background = s.color;
+    belt.appendChild(div);
+  });
+}
+
+function renderTable(rows, filter){
+  const tbody = document.getElementById('tblBody');
+  const now = new Date();
+  const f = (filter||'').toLowerCase();
+  const filtered = rows.filter(r=>{
+    if(!f) return true;
+    return r.orderId.toLowerCase().includes(f) || r.reason.toLowerCase().includes(f) || r.category.toLowerCase().includes(f);
+  }).sort((a,b)=> (b.date?.getTime()||0) - (a.date?.getTime()||0));
+
+  tbody.innerHTML = '';
+  document.getElementById('emptyState').style.display = filtered.length ? 'none' : 'block';
+
+  filtered.forEach(r=>{
+    let statusBadge, ageCell;
+    if(!r.uploadDate){
+      const days = r.date ? Math.floor((now - r.date)/86400000) : null;
+      statusBadge = `<span class="badge pending">Pending</span>`;
+      ageCell = days!=null ? `${days}d old` : '—';
+    } else {
+      const hours = r.date ? (r.uploadDate - r.date)/3600000 : null;
+      const isMatch = hours!=null && hours < 48;
+      statusBadge = isMatch ? `<span class="badge match">SLA Match</span>` : `<span class="badge breach">SLA Breach</span>`;
+      ageCell = hours!=null ? `${Math.round(hours)} hrs` : '—';
+    }
+    const linkCell = r.link ? `<a class="linkcell mono" href="${r.link}" target="_blank" rel="noopener">Open ↗</a>` : '—';
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="mono">${r.orderId || '—'}</td>
+      <td>${fmtDate(r.date)}</td>
+      <td>${fmtDate(r.uploadDate)}</td>
+      <td>${statusBadge}</td>
+      <td class="mono">${ageCell}</td>
+      <td>${r.category || '—'}</td>
+      <td>${r.reason || '—'}</td>
+      <td>${r.remarks || '—'}</td>
+      <td>${linkCell}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function renderSlaChart(match, breach){
+  const ctx = document.getElementById('slaChart');
+  if(slaChartInstance) slaChartInstance.destroy();
+  slaChartInstance = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: ['SLA Match', 'SLA Breach'],
+      datasets: [{
+        data: [match, breach],
+        backgroundColor: ['#2bd4a0', '#ff5a5f'],
+        borderColor: '#161f2c',
+        borderWidth: 3,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom', labels: { color: '#eef2f6', font: { family: 'Inter', size: 12 } } }
+      },
+      cutout: '68%'
+    }
+  });
+}
+
+function renderAll(){
+  const stats = computeStats(allRows);
+  document.getElementById('kpiTotal').textContent = stats.total;
+  document.getElementById('kpiPending').textContent = stats.pending;
+  document.getElementById('kpiMatch').textContent = stats.match;
+  document.getElementById('kpiBreach').textContent = stats.breach;
+  const closed = stats.match + stats.breach;
+  document.getElementById('kpiSlaPct').textContent = closed ? Math.round(stats.match/closed*100)+'%' : '—';
+
+  document.getElementById('ag12').textContent = stats.aging.b12;
+  document.getElementById('ag35').textContent = stats.aging.b35;
+  document.getElementById('ag610').textContent = stats.aging.b610;
+  document.getElementById('ag10p').textContent = stats.aging.b10p;
+  renderBelt(stats.aging);
+
+  renderSlaChart(stats.match, stats.breach);
+  renderBars(document.getElementById('catBars'), stats.catCounts);
+  renderBars(document.getElementById('reasonBars'), stats.reasonCounts);
+
+  renderTable(allRows, document.getElementById('search').value);
+}
+
+async function loadData(){
+  setStatus('Refreshing…');
+  try{
+    const table = await fetchTable(sheetId, sheetName);
+    allRows = buildRows(table);
+    renderAll();
+    setStatus('Last updated ' + new Date().toLocaleTimeString('en-IN') + ' · ' + allRows.length + ' rows loaded');
+  } catch(err){
+    setStatus(err.message || 'Failed to load sheet.', true);
+  }
+}
+
+document.getElementById('loadBtn').addEventListener('click', ()=>{
+  const url = document.getElementById('sheetUrl').value.trim();
+  const tab = document.getElementById('tabName').value.trim() || 'Escalation';
+  const id = url ? extractSheetId(url) : null;
+  if(url && !id){ setStatus('Could not read a sheet ID from that link.', true); return; }
+  if(id) sheetId = id;
+  sheetName = tab;
+  loadData();
+});
+document.getElementById('refreshBtn').addEventListener('click', loadData);
+document.getElementById('search').addEventListener('input', (e)=> renderTable(allRows, e.target.value));
+
+document.getElementById('sheetUrl').value = 'https://docs.google.com/spreadsheets/d/1ZcxxO5Eq4lcDNrFeQCfy-fn4BLY9UW5O93cU0MGwMeY/edit';
+
+loadData();
+setInterval(loadData, 5*60*1000);
+</script>
+</body>
+</html>
