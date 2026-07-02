@@ -148,6 +148,9 @@
       <button id="loadBtn">Load</button>
       <button class="btn-ghost" id="refreshBtn">↻ Refresh</button>
       <button class="btn-ghost" id="manageSourcesBtn">+ Add source</button>
+      <select id="monthFilter" style="background: var(--panel-2); border:1px solid var(--line); color: var(--text); padding: 9px 12px; border-radius: 8px; font-size: 13px; font-family:'Inter',sans-serif; min-width:150px;">
+        <option value="all">All Months (Received)</option>
+      </select>
     </div>
     <div id="status">Loading…</div>
     <div id="addSourcePanel" style="display:none; margin-top:10px; background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:12px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
@@ -221,8 +224,8 @@
     <div class="chart-box" id="slaChartBox"><canvas id="slaChart"></canvas></div>
   </div>
   <div class="card">
-    <h2>By Category &amp; Escalation Reason</h2>
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px;">
+    <h2>By Category, Reason &amp; Short Remarks</h2>
+    <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:20px;">
       <div>
         <div class="sub" style="margin-bottom:8px; color:var(--muted); font-size:11px; text-transform:uppercase;">Category</div>
         <div id="catBars"></div>
@@ -231,8 +234,20 @@
         <div class="sub" style="margin-bottom:8px; color:var(--muted); font-size:11px; text-transform:uppercase;">Escalation Reason</div>
         <div id="reasonBars"></div>
       </div>
+      <div>
+        <div class="sub" style="margin-bottom:8px; color:var(--muted); font-size:11px; text-transform:uppercase;">Short Remarks</div>
+        <div id="shortRemarksBars"></div>
+      </div>
     </div>
   </div>
+</section>
+
+<section class="conveyor-wrap">
+  <div class="conveyor-title">
+    <h2>Received vs Processed — Day-wise</h2>
+    <span>trend line · received date vs upload date, filtered by month above</span>
+  </div>
+  <div class="chart-box" id="trendChartBox" style="height:280px;"><canvas id="trendChart"></canvas></div>
 </section>
 
 <section class="table-card">
@@ -252,6 +267,7 @@
           <th>Category</th>
           <th>Escalation Reason</th>
           <th>Warehouse Remarks</th>
+          <th>Short Remarks</th>
           <th>Link</th>
         </tr>
       </thead>
@@ -288,6 +304,7 @@ let sheetId = SOURCES[0] ? SOURCES[0].id : null;
 let sheetName = SOURCES[0] ? SOURCES[0].tab : null;
 let allRows = [];
 let slaChartInstance = null;
+let trendChartInstance = null;
 
 function populateSourceSelect(){
   const sel = document.getElementById('sourceSelect');
@@ -446,6 +463,7 @@ function buildRows(table){
     remarks: colMap['warehouseremarks'],
     category: colMap['category'],
     uploadDate: colMap['uploaddate'],
+    shortRemarks: colMap['shortremarks'],
   };
   const rows = [];
   table.rows.forEach(r=>{
@@ -463,6 +481,7 @@ function buildRows(table){
       remarks: cellText(r, idx.remarks),
       category: cellText(r, idx.category),
       uploadDate,
+      shortRemarks: cellText(r, idx.shortRemarks),
     });
   });
   return rows;
@@ -473,10 +492,11 @@ function computeStats(rows){
   const uniqueOrders = new Set(rows.map(r=>r.orderId).filter(Boolean));
   let match=0, breach=0, pending=0;
   const aging = {b12:0,b35:0,b610:0,b10p:0};
-  const catCounts = {}; const reasonCounts = {};
+  const catCounts = {}; const reasonCounts = {}; const shortRemarksCounts = {};
   rows.forEach(r=>{
     if(r.category) catCounts[r.category] = (catCounts[r.category]||0)+1;
     if(r.reason) reasonCounts[r.reason] = (reasonCounts[r.reason]||0)+1;
+    if(r.shortRemarks) shortRemarksCounts[r.shortRemarks] = (shortRemarksCounts[r.shortRemarks]||0)+1;
     if(!r.uploadDate){
       pending++;
       if(r.date){
@@ -491,7 +511,7 @@ function computeStats(rows){
       if(hours < 48) match++; else breach++;
     }
   });
-  return {total: uniqueOrders.size, match, breach, pending, aging, catCounts, reasonCounts};
+  return {total: uniqueOrders.size, match, breach, pending, aging, catCounts, reasonCounts, shortRemarksCounts};
 }
 
 function fmtDate(d){
@@ -576,6 +596,7 @@ function renderTable(rows, filter){
       <td>${r.category || '—'}</td>
       <td>${r.reason || '—'}</td>
       <td>${r.remarks || '—'}</td>
+      <td>${r.shortRemarks || '—'}</td>
       <td>${linkCell}</td>
     `;
     tbody.appendChild(tr);
@@ -623,8 +644,117 @@ function renderSlaChart(match, breach){
   });
 }
 
+function monthKey(d){
+  if(!d) return null;
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
+}
+function monthLabel(key){
+  const [y,m] = key.split('-').map(Number);
+  return new Date(y, m-1, 1).toLocaleDateString('en-GB', {month:'short', year:'numeric'});
+}
+
+function populateMonthFilter(rows){
+  const sel = document.getElementById('monthFilter');
+  const prevVal = sel.value || 'all';
+  const keys = [...new Set(rows.map(r=>monthKey(r.date)).filter(Boolean))].sort();
+  sel.innerHTML = '<option value="all">All Months (Received)</option>';
+  keys.forEach(k=>{
+    const opt = document.createElement('option');
+    opt.value = k;
+    opt.textContent = monthLabel(k);
+    sel.appendChild(opt);
+  });
+  if([...sel.options].some(o=>o.value===prevVal)) sel.value = prevVal;
+}
+
+function getFilteredRows(){
+  const sel = document.getElementById('monthFilter');
+  const val = sel ? sel.value : 'all';
+  if(!val || val === 'all') return allRows;
+  return allRows.filter(r => monthKey(r.date) === val);
+}
+
+function dayKey(d){
+  if(!d) return null;
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+}
+function dayLabel(key){
+  const [y,m,d] = key.split('-').map(Number);
+  return new Date(y, m-1, d).toLocaleDateString('en-GB', {day:'2-digit', month:'short'});
+}
+
+function renderTrendChart(rows){
+  const receivedByDay = {}; const processedByDay = {};
+  rows.forEach(r=>{
+    const rk = dayKey(r.date);
+    if(rk) receivedByDay[rk] = (receivedByDay[rk]||0)+1;
+    const uk = dayKey(r.uploadDate);
+    if(uk) processedByDay[uk] = (processedByDay[uk]||0)+1;
+  });
+  const allDays = [...new Set([...Object.keys(receivedByDay), ...Object.keys(processedByDay)])].sort();
+  const labels = allDays.map(dayLabel);
+  const receivedData = allDays.map(k => receivedByDay[k] || 0);
+  const processedData = allDays.map(k => processedByDay[k] || 0);
+
+  const box = document.getElementById('trendChartBox');
+  if(typeof Chart === 'undefined'){
+    trendChartInstance = null;
+    box.innerHTML = `<div style="display:flex; justify-content:center; align-items:center; height:100%; color:var(--muted); font-size:12px;">Chart library failed to load</div>`;
+    return;
+  }
+  if(!allDays.length){
+    if(trendChartInstance){ trendChartInstance.destroy(); trendChartInstance = null; }
+    box.innerHTML = `<div style="display:flex; justify-content:center; align-items:center; height:100%; color:var(--muted); font-size:12px;">No data for this period</div>`;
+    return;
+  }
+  if(trendChartInstance){ trendChartInstance.destroy(); trendChartInstance = null; }
+  if(!document.getElementById('trendChart')){
+    box.innerHTML = '<canvas id="trendChart"></canvas>';
+  }
+  const ctx = document.getElementById('trendChart');
+  trendChartInstance = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Received',
+          data: receivedData,
+          borderColor: '#4fa3ff',
+          backgroundColor: 'rgba(79,163,255,0.12)',
+          tension: 0.3,
+          fill: true,
+          pointRadius: 3,
+        },
+        {
+          label: 'Processed',
+          data: processedData,
+          borderColor: '#2bd4a0',
+          backgroundColor: 'rgba(43,212,160,0.12)',
+          tension: 0.3,
+          fill: true,
+          pointRadius: 3,
+        }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { position: 'bottom', labels: { color: '#eef2f6', font: { family: 'Inter', size: 12 } } }
+      },
+      scales: {
+        x: { ticks: { color: '#8b98a8', font:{size:11} }, grid: { color: '#2a3644' } },
+        y: { beginAtZero: true, ticks: { color: '#8b98a8', font:{size:11}, precision:0 }, grid: { color: '#2a3644' } }
+      }
+    }
+  });
+}
+
 function renderAll(){
-  const stats = computeStats(allRows);
+  populateMonthFilter(allRows);
+  const rows = getFilteredRows();
+  const stats = computeStats(rows);
   document.getElementById('kpiTotal').textContent = stats.total;
   document.getElementById('kpiPending').textContent = stats.pending;
   document.getElementById('kpiMatch').textContent = stats.match;
@@ -641,8 +771,10 @@ function renderAll(){
   renderSlaChart(stats.match, stats.breach);
   renderBars(document.getElementById('catBars'), stats.catCounts);
   renderBars(document.getElementById('reasonBars'), stats.reasonCounts);
+  renderBars(document.getElementById('shortRemarksBars'), stats.shortRemarksCounts);
+  renderTrendChart(rows);
 
-  renderTable(allRows, document.getElementById('search').value);
+  renderTable(rows, document.getElementById('search').value);
 }
 
 async function loadData(){
@@ -688,7 +820,8 @@ document.getElementById('loadBtn').addEventListener('click', ()=>{
   loadData();
 });
 document.getElementById('refreshBtn').addEventListener('click', loadData);
-document.getElementById('search').addEventListener('input', (e)=> renderTable(allRows, e.target.value));
+document.getElementById('search').addEventListener('input', (e)=> renderTable(getFilteredRows(), e.target.value));
+document.getElementById('monthFilter').addEventListener('change', renderAll);
 
 loadData();
 setInterval(loadData, 5*60*1000);
