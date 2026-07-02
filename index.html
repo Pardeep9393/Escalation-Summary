@@ -86,7 +86,9 @@
   .belt{ position:relative; height: 10px; background: var(--panel-2); border-radius: 6px; overflow:hidden; display:flex; border:1px solid var(--line); }
   .belt .seg{ height: 100%; }
   .stages{ display:grid; grid-template-columns: repeat(4,1fr); gap: 14px; margin-top: 16px; }
-  .stage{ border-left: 3px solid var(--line); padding-left: 12px; }
+  .stage{ border-left: 3px solid var(--line); padding-left: 12px; cursor:pointer; border-radius: 4px; transition: background 0.15s; padding-top:6px; padding-bottom:6px; padding-right:6px; }
+  .stage:hover{ background: var(--panel-2); }
+  .stage.active{ background: var(--panel-2); box-shadow: inset 0 0 0 1px var(--line); }
   .stage .n{ font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size: 30px; line-height:1; }
   .stage .lbl{ font-size: 12px; color: var(--muted); margin-top: 4px; }
 
@@ -195,26 +197,29 @@
 <section class="conveyor-wrap">
   <div class="conveyor-title">
     <h2>Pending Aging Belt</h2>
-    <span>days since received, still open · as of today</span>
+    <span>days since received, still open · as of today · click a bucket to filter table below</span>
   </div>
   <div class="belt" id="belt"></div>
-  <div class="stages">
-    <div class="stage" style="border-color: var(--green)">
+  <div class="stages" id="stages">
+    <div class="stage" id="stageBtn-b12" data-bucket="b12" style="border-color: var(--green)">
       <div class="n" id="ag12">—</div>
       <div class="lbl">1–2 days</div>
     </div>
-    <div class="stage" style="border-color: var(--blue)">
+    <div class="stage" id="stageBtn-b35" data-bucket="b35" style="border-color: var(--blue)">
       <div class="n" id="ag35">—</div>
       <div class="lbl">3–5 days</div>
     </div>
-    <div class="stage" style="border-color: var(--amber)">
+    <div class="stage" id="stageBtn-b610" data-bucket="b610" style="border-color: var(--amber)">
       <div class="n" id="ag610">—</div>
       <div class="lbl">6–10 days</div>
     </div>
-    <div class="stage" style="border-color: var(--red)">
+    <div class="stage" id="stageBtn-b10p" data-bucket="b10p" style="border-color: var(--red)">
       <div class="n" id="ag10p">—</div>
       <div class="lbl">&gt; 10 days</div>
     </div>
+  </div>
+  <div id="agingFilterNote" style="display:none; margin-top:12px; font-size:12px; color:var(--muted);">
+    Showing pending orders in <strong id="agingFilterLabel"></strong> · <a href="#" id="agingFilterClear" style="color:var(--blue); text-decoration:none;">Clear filter ✕</a>
   </div>
 </section>
 
@@ -303,6 +308,7 @@ let SOURCES = [...DEFAULT_SOURCES, ...loadCustomSources()];
 let sheetId = SOURCES[0] ? SOURCES[0].id : null;
 let sheetName = SOURCES[0] ? SOURCES[0].tab : null;
 let allRows = [];
+let agingFilter = null; // 'b12' | 'b35' | 'b610' | 'b10p' | null
 let slaChartInstance = null;
 let trendChartInstance = null;
 
@@ -487,8 +493,18 @@ function buildRows(table){
   return rows;
 }
 
-function computeStats(rows){
+function getAgingBucket(r){
+  if(r.uploadDate || !r.date) return null; // only pending rows with a received date have an aging bucket
   const now = new Date();
+  const days = Math.floor((now - r.date)/86400000);
+  if(days<=2) return 'b12';
+  if(days<=5) return 'b35';
+  if(days<=10) return 'b610';
+  return 'b10p';
+}
+const AGING_LABELS = {b12:'1–2 days', b35:'3–5 days', b610:'6–10 days', b10p:'> 10 days'};
+
+function computeStats(rows){
   const uniqueOrders = new Set(rows.map(r=>r.orderId).filter(Boolean));
   let match=0, breach=0, pending=0;
   const aging = {b12:0,b35:0,b610:0,b10p:0};
@@ -499,13 +515,8 @@ function computeStats(rows){
     if(r.shortRemarks) shortRemarksCounts[r.shortRemarks] = (shortRemarksCounts[r.shortRemarks]||0)+1;
     if(!r.uploadDate){
       pending++;
-      if(r.date){
-        const days = Math.floor((now - r.date)/86400000);
-        if(days<=2) aging.b12++;
-        else if(days<=5) aging.b35++;
-        else if(days<=10) aging.b610++;
-        else aging.b10p++;
-      }
+      const bucket = getAgingBucket(r);
+      if(bucket) aging[bucket]++;
     } else if(r.date){
       const hours = (r.uploadDate - r.date)/3600000;
       if(hours < 48) match++; else breach++;
@@ -551,6 +562,18 @@ function renderBelt(aging){
     div.style.background = s.color;
     belt.appendChild(div);
   });
+
+  ['b12','b35','b610','b10p'].forEach(key=>{
+    const el = document.getElementById('stageBtn-'+key);
+    if(el) el.classList.toggle('active', agingFilter === key);
+  });
+  const note = document.getElementById('agingFilterNote');
+  if(agingFilter){
+    note.style.display = 'block';
+    document.getElementById('agingFilterLabel').textContent = AGING_LABELS[agingFilter];
+  } else {
+    note.style.display = 'none';
+  }
 }
 
 function renderTable(rows, filter){
@@ -774,7 +797,8 @@ function renderAll(){
   renderBars(document.getElementById('shortRemarksBars'), stats.shortRemarksCounts);
   renderTrendChart(rows);
 
-  renderTable(rows, document.getElementById('search').value);
+  const tableRows = agingFilter ? rows.filter(r => getAgingBucket(r) === agingFilter) : rows;
+  renderTable(tableRows, document.getElementById('search').value);
 }
 
 async function loadData(){
@@ -820,8 +844,25 @@ document.getElementById('loadBtn').addEventListener('click', ()=>{
   loadData();
 });
 document.getElementById('refreshBtn').addEventListener('click', loadData);
-document.getElementById('search').addEventListener('input', (e)=> renderTable(getFilteredRows(), e.target.value));
+document.getElementById('search').addEventListener('input', (e)=>{
+  const rows = getFilteredRows();
+  const tableRows = agingFilter ? rows.filter(r => getAgingBucket(r) === agingFilter) : rows;
+  renderTable(tableRows, e.target.value);
+});
 document.getElementById('monthFilter').addEventListener('change', renderAll);
+
+document.getElementById('stages').addEventListener('click', (e)=>{
+  const stageEl = e.target.closest('.stage');
+  if(!stageEl) return;
+  const bucket = stageEl.dataset.bucket;
+  agingFilter = (agingFilter === bucket) ? null : bucket; // click again to clear
+  renderAll();
+});
+document.getElementById('agingFilterClear').addEventListener('click', (e)=>{
+  e.preventDefault();
+  agingFilter = null;
+  renderAll();
+});
 
 loadData();
 setInterval(loadData, 5*60*1000);
