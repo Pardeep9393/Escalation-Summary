@@ -268,9 +268,7 @@
 // name  = label shown in the dropdown
 // id    = the long ID from the Google Sheet URL (the part between /d/ and /edit)
 // tab   = the sheet tab name to read
-const DEFAULT_SOURCES = [
-  { name: 'PILGRIM', id: '1ZcxxO5Eq4lcDNrFeQCfy-fn4BLY9UW5O93cU0MGwMeY', tab: 'Escalation' },
-];
+const DEFAULT_SOURCES = [];
 
 const CUSTOM_SOURCES_KEY = 'escalationDashboard.customSources';
 
@@ -286,8 +284,8 @@ function saveCustomSources(list){
 
 let SOURCES = [...DEFAULT_SOURCES, ...loadCustomSources()];
 
-let sheetId = SOURCES[0].id;
-let sheetName = SOURCES[0].tab;
+let sheetId = SOURCES[0] ? SOURCES[0].id : null;
+let sheetName = SOURCES[0] ? SOURCES[0].tab : null;
 let allRows = [];
 let slaChartInstance = null;
 
@@ -360,9 +358,16 @@ document.getElementById('removeSourceBtn').addEventListener('click', ()=>{
   saveCustomSources(custom);
   SOURCES = [...DEFAULT_SOURCES, ...custom];
   populateSourceSelect();
-  sheetId = SOURCES[0].id; sheetName = SOURCES[0].tab;
-  document.getElementById('sourceSelect').value = 0;
-  loadData();
+  if(SOURCES[0]){
+    sheetId = SOURCES[0].id; sheetName = SOURCES[0].tab;
+    document.getElementById('sourceSelect').value = 0;
+    loadData();
+  } else {
+    sheetId = null; sheetName = null;
+    allRows = [];
+    renderAll();
+    setStatus('No sources left. Add a Google Sheet source above to get started.', true);
+  }
 });
 
 function extractSheetId(url){
@@ -641,12 +646,30 @@ function renderAll(){
 }
 
 async function loadData(){
+  if(!sheetId){
+    setStatus('No source loaded yet — add a Google Sheet above using "+ Add source" (or paste a link and click Load).', true);
+    allRows = [];
+    renderAll();
+    return;
+  }
   setStatus('Refreshing…');
   try{
     const table = await fetchTable(sheetId, sheetName);
     allRows = buildRows(table);
     renderAll();
-    setStatus('Last updated ' + new Date().toLocaleTimeString('en-IN') + ' · ' + allRows.length + ' rows loaded');
+    if(allRows.length === 0 && table.rows && table.rows.length > 0){
+      // The sheet responded and has rows, but none of them matched — almost always
+      // means the column headers in the sheet don't match what the code expects.
+      const foundHeaders = table.cols.map(c => c.label || '(blank)').join(', ');
+      setStatus(
+        `Connected OK — sheet has ${table.rows.length} row(s), but 0 matched. ` +
+        `Expected columns like "Date" and "Order ID" not found. Headers detected in row 1: [${foundHeaders}]. ` +
+        `Check that your header row has exactly these names: Date, Order ID, Escalation Reason, Category, Warehouse Remarks, Link, Upload Date.`,
+        true
+      );
+    } else {
+      setStatus('Last updated ' + new Date().toLocaleTimeString('en-IN') + ' · ' + allRows.length + ' rows loaded');
+    }
   } catch(err){
     setStatus(err.message || 'Failed to load sheet.', true);
   }
