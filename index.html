@@ -162,7 +162,7 @@
       <input id="newSourceTab" type="text" placeholder="Tab name" value="Escalation" style="min-width:120px" />
       <button id="saveSourceBtn">Save</button>
       <button class="btn-ghost" id="removeSourceBtn">Remove selected</button>
-      <span style="font-size:11px; color:var(--muted); width:100%;">Saved sources are stored in this browser and show up in the dropdown above. Use "Copy Share Link" to send a link that works on any device without needing to re-add the source.</span>
+      <span style="font-size:11px; color:var(--muted); width:100%;">Saved sources are stored in a shared Google Sheet and show up in the dropdown above on EVERY device that opens this dashboard — no re-adding needed per device. (Requires SOURCES_API_URL to be configured once — see setup guide.) "Copy Share Link" still works too, for pointing straight at one specific client.</span>
     </div>
   </div>
 </header>
@@ -318,19 +318,70 @@ const DEFAULT_SOURCES = [
   { name: 'PILGRIM', id: '1ZcxxO5Eq4lcDNrFeQCfy-fn4BLY9UW5O93cU0MGwMeY', tab: 'Escalation' },
 ];
 
-const CUSTOM_SOURCES_KEY = 'escalationDashboard.customSources';
+// Paste your deployed Google Apps Script Web App URL here (ends in /exec).
+// Once set, every client added via "+ Add source" is written to a shared Google
+// Sheet and shows up on EVERY device/browser that opens this dashboard — not just
+// the one that added it. See setup guide provided alongside this file.
+const SOURCES_API_URL = 'PASTE_YOUR_APPS_SCRIPT_WEB_APP_URL_HERE';
 
-function loadCustomSources(){
+function sourcesApiConfigured(){
+  return !!SOURCES_API_URL && !SOURCES_API_URL.includes('PASTE_YOUR_APPS_SCRIPT_WEB_APP_URL_HERE');
+}
+
+// Fetches the shared client list from the Apps Script Web App.
+// Returns: array on success, [] if not configured yet, null if the fetch itself failed.
+async function fetchSharedSources(){
+  if(!sourcesApiConfigured()) return [];
   try{
-    const raw = localStorage.getItem(CUSTOM_SOURCES_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch(e){ return []; }
-}
-function saveCustomSources(list){
-  try{ localStorage.setItem(CUSTOM_SOURCES_KEY, JSON.stringify(list)); } catch(e){}
+    const res = await fetch(SOURCES_API_URL + '?action=list');
+    if(!res.ok) throw new Error('HTTP ' + res.status);
+    const list = await res.json();
+    return Array.isArray(list) ? list : [];
+  } catch(e){
+    console.error('Could not load shared sources', e);
+    return null;
+  }
 }
 
-let SOURCES = [...DEFAULT_SOURCES, ...loadCustomSources()];
+async function addSharedSource(entry){
+  if(!sourcesApiConfigured()) throw new Error('Shared source list is not set up yet — set SOURCES_API_URL in the code (see setup guide) so clients show on every device.');
+  const res = await fetch(SOURCES_API_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // avoids CORS preflight against Apps Script
+    body: JSON.stringify({ action: 'add', name: entry.name, id: entry.id, tab: entry.tab })
+  });
+  const out = await res.json();
+  if(!out.ok) throw new Error(out.error || 'Could not save the source.');
+}
+
+async function removeSharedSource(entry){
+  if(!sourcesApiConfigured()) throw new Error('Shared source list is not set up yet — set SOURCES_API_URL in the code (see setup guide).');
+  const res = await fetch(SOURCES_API_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({ action: 'remove', name: entry.name, id: entry.id })
+  });
+  const out = await res.json();
+  if(!out.ok) throw new Error(out.error || 'Could not remove the source.');
+}
+
+// Rebuilds SOURCES from DEFAULT_SOURCES + the shared Google Sheet list, and refreshes the dropdown.
+async function refreshSourceList(){
+  const shared = await fetchSharedSources();
+  if(shared === null){
+    setStatus('Could not reach the shared client list (Apps Script) — showing default source only. Check SOURCES_API_URL and your internet connection.', true);
+    SOURCES = [...DEFAULT_SOURCES];
+  } else {
+    const merged = [...DEFAULT_SOURCES];
+    shared.forEach(s=>{
+      if(!merged.some(m => m.name === s.name && m.id === s.id)) merged.push(s);
+    });
+    SOURCES = merged;
+  }
+  populateSourceSelect();
+}
+
+let SOURCES = [...DEFAULT_SOURCES];
 
 let sheetId = SOURCES[0] ? SOURCES[0].id : null;
 let sheetName = SOURCES[0] ? SOURCES[0].tab : null;
@@ -413,7 +464,7 @@ document.getElementById('shareLinkBtn').addEventListener('click', async ()=>{
   }
 });
 
-document.getElementById('saveSourceBtn').addEventListener('click', ()=>{
+document.getElementById('saveSourceBtn').addEventListener('click', async ()=>{
   const name = document.getElementById('newSourceName').value.trim();
   const idOrUrl = document.getElementById('newSourceId').value.trim();
   const tab = document.getElementById('newSourceTab').value.trim() || 'Escalation';
@@ -421,45 +472,58 @@ document.getElementById('saveSourceBtn').addEventListener('click', ()=>{
   const id = idOrUrl.includes('/') ? extractSheetId(idOrUrl) : idOrUrl;
   if(!id){ setStatus('Could not read a sheet ID from that value.', true); return; }
 
-  const custom = loadCustomSources();
-  const existingIdx = custom.findIndex(s => s.name.toLowerCase() === name.toLowerCase());
   const entry = { name, id, tab };
-  if(existingIdx >= 0) custom[existingIdx] = entry; else custom.push(entry);
-  saveCustomSources(custom);
+  const btn = document.getElementById('saveSourceBtn');
+  btn.disabled = true;
+  setStatus('Saving "' + name + '" to the shared client list…');
+  try{
+    await addSharedSource(entry);
+    await refreshSourceList();
+    const newIndex = SOURCES.findIndex(s => s.name === name && s.id === id);
+    if(newIndex >= 0) document.getElementById('sourceSelect').value = newIndex;
+    document.getElementById('newSourceName').value = '';
+    document.getElementById('newSourceId').value = '';
 
-  SOURCES = [...DEFAULT_SOURCES, ...custom];
-  populateSourceSelect();
-  const newIndex = SOURCES.findIndex(s => s.name === name && s.id === id);
-  document.getElementById('sourceSelect').value = newIndex;
-  document.getElementById('newSourceName').value = '';
-  document.getElementById('newSourceId').value = '';
-
-  sheetId = id; sheetName = tab;
-  loadData();
-  loadClientSummary();
+    sheetId = id; sheetName = tab;
+    loadData();
+    loadClientSummary();
+    setStatus('"' + name + '" added — now visible on every device using this link.');
+  } catch(err){
+    setStatus(err.message || 'Could not save the source.', true);
+  } finally {
+    btn.disabled = false;
+  }
 });
 
-document.getElementById('removeSourceBtn').addEventListener('click', ()=>{
+document.getElementById('removeSourceBtn').addEventListener('click', async ()=>{
   const sel = document.getElementById('sourceSelect');
   if(sel.value === 'custom'){ setStatus('Nothing to remove — "Custom link" is not a saved source.', true); return; }
   const s = SOURCES[+sel.value];
   const isDefault = DEFAULT_SOURCES.some(d => d.id === s.id && d.name === s.name);
   if(isDefault){ setStatus('Default sources can\'t be removed here — edit DEFAULT_SOURCES in the code instead.', true); return; }
-  const custom = loadCustomSources().filter(c => !(c.name === s.name && c.id === s.id));
-  saveCustomSources(custom);
-  SOURCES = [...DEFAULT_SOURCES, ...custom];
-  populateSourceSelect();
-  if(SOURCES[0]){
-    sheetId = SOURCES[0].id; sheetName = SOURCES[0].tab;
-    document.getElementById('sourceSelect').value = 0;
-    loadData();
-  } else {
-    sheetId = null; sheetName = null;
-    allRows = [];
-    renderAll();
-    setStatus('No sources left. Add a Google Sheet source above to get started.', true);
+
+  const btn = document.getElementById('removeSourceBtn');
+  btn.disabled = true;
+  setStatus('Removing "' + s.name + '"…');
+  try{
+    await removeSharedSource(s);
+    await refreshSourceList();
+    if(SOURCES[0]){
+      sheetId = SOURCES[0].id; sheetName = SOURCES[0].tab;
+      document.getElementById('sourceSelect').value = 0;
+      loadData();
+    } else {
+      sheetId = null; sheetName = null;
+      allRows = [];
+      renderAll();
+      setStatus('No sources left. Add a Google Sheet source above to get started.', true);
+    }
+    loadClientSummary();
+  } catch(err){
+    setStatus(err.message || 'Could not remove the source.', true);
+  } finally {
+    btn.disabled = false;
   }
-  loadClientSummary();
 });
 
 function extractSheetId(url){
@@ -995,10 +1059,28 @@ document.getElementById('agingFilterClear').addEventListener('click', (e)=>{
   renderAll();
 });
 
-loadData();
-loadClientSummary();
-setInterval(loadData, 5*60*1000);
-setInterval(loadClientSummary, 5*60*1000);
+async function init(){
+  await refreshSourceList();
+  if(urlSourceApplied){
+    document.getElementById('sourceSelect').value = 'custom';
+    document.getElementById('tabName').value = sheetName;
+  } else if(SOURCES[0]){
+    sheetId = SOURCES[0].id;
+    sheetName = SOURCES[0].tab;
+    document.getElementById('sourceSelect').value = 0;
+  }
+  loadData();
+  loadClientSummary();
+}
+init();
+
+// Every 5 min: re-pull the shared client list (so a client added on another device
+// shows up here too), then refresh the data — all without a visible page reload.
+setInterval(async ()=>{
+  await refreshSourceList();
+  loadData();
+  loadClientSummary();
+}, 5*60*1000);
 </script>
 </body>
 </html>
