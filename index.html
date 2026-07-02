@@ -322,7 +322,7 @@ const DEFAULT_SOURCES = [
 // Once set, every client added via "+ Add source" is written to a shared Google
 // Sheet and shows up on EVERY device/browser that opens this dashboard — not just
 // the one that added it. See setup guide provided alongside this file.
-const SOURCES_API_URL = 'PASTE_YOUR_APPS_SCRIPT_WEB_APP_URL_HERE';
+const SOURCES_API_URL = 'https://script.google.com/macros/s/AKfycby4q3TUtF0qfP7GjfAGUTE2NdfyGbxMYLxT-79TlQHYexGosUGMIVlHc_OAha0GAZOfZA/exec';
 
 function sourcesApiConfigured(){
   return !!SOURCES_API_URL && !SOURCES_API_URL.includes('PASTE_YOUR_APPS_SCRIPT_WEB_APP_URL_HERE');
