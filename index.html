@@ -102,7 +102,7 @@
   .bar-row .name{ width: 150px; flex-shrink:0; color: var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .bar-track{ flex:1; background: var(--panel-2); border-radius: 4px; height: 10px; overflow:hidden; }
   .bar-fill{ height:100%; background: var(--blue); border-radius: 4px; }
-  .bar-row .cnt{ width: 30px; text-align:right; color: var(--muted); font-family:'JetBrains Mono',monospace; font-size:12px; }
+  .bar-row .cnt{ min-width: 30px; flex-shrink:0; text-align:right; color: var(--muted); font-family:'JetBrains Mono',monospace; font-size:12px; white-space:nowrap; }
 
   /* table */
   .table-card{ background: var(--panel); border:1px solid var(--line); border-radius: var(--radius); padding: 18px 20px; }
@@ -150,6 +150,7 @@
       <button id="loadBtn">Load</button>
       <button class="btn-ghost" id="refreshBtn">↻ Refresh</button>
       <button class="btn-ghost" id="manageSourcesBtn">+ Add source</button>
+      <button class="btn-ghost" id="shareLinkBtn">🔗 Copy Share Link</button>
       <select id="monthFilter" style="background: var(--panel-2); border:1px solid var(--line); color: var(--text); padding: 9px 12px; border-radius: 8px; font-size: 13px; font-family:'Inter',sans-serif; min-width:150px;">
         <option value="all">All Months (Received)</option>
       </select>
@@ -161,7 +162,7 @@
       <input id="newSourceTab" type="text" placeholder="Tab name" value="Escalation" style="min-width:120px" />
       <button id="saveSourceBtn">Save</button>
       <button class="btn-ghost" id="removeSourceBtn">Remove selected</button>
-      <span style="font-size:11px; color:var(--muted); width:100%;">Saved sources are stored in this browser and show up in the dropdown above.</span>
+      <span style="font-size:11px; color:var(--muted); width:100%;">Saved sources are stored in this browser and show up in the dropdown above. Use "Copy Share Link" to send a link that works on any device without needing to re-add the source.</span>
     </div>
   </div>
 </header>
@@ -240,7 +241,7 @@
         <div id="reasonBars"></div>
       </div>
       <div>
-        <div class="sub" style="margin-bottom:8px; color:var(--muted); font-size:11px; text-transform:uppercase;">Short Remarks</div>
+        <div class="sub" style="margin-bottom:8px; color:var(--muted); font-size:11px; text-transform:uppercase;">Short Remarks (% of Total Escalations)</div>
         <div id="shortRemarksBars"></div>
       </div>
     </div>
@@ -307,6 +308,26 @@ let SOURCES = [...DEFAULT_SOURCES, ...loadCustomSources()];
 
 let sheetId = SOURCES[0] ? SOURCES[0].id : null;
 let sheetName = SOURCES[0] ? SOURCES[0].tab : null;
+let urlSourceApplied = false;
+
+// If the link was shared with ?sheet=...&tab=... in the URL, use that — this makes the
+// dashboard show the same data on ANY device/browser, since it doesn't depend on this
+// browser's localStorage having a saved source.
+(function applyUrlSource(){
+  try{
+    const params = new URLSearchParams(window.location.search);
+    const sheetParam = params.get('sheet');
+    const tabParam = params.get('tab');
+    if(sheetParam){
+      const id = sheetParam.includes('/') ? extractSheetId(sheetParam) : sheetParam;
+      if(id){
+        sheetId = id;
+        sheetName = tabParam || 'Escalation';
+        urlSourceApplied = true;
+      }
+    }
+  } catch(e){ /* URL parsing not available — ignore, fall back to default/local source */ }
+})();
 let allRows = [];
 let agingFilter = null; // 'b12' | 'b35' | 'b610' | 'b10p' | null
 let slaChartInstance = null;
@@ -329,6 +350,10 @@ function populateSourceSelect(){
   if(prevVal && [...sel.options].some(o=>o.value===prevVal)) sel.value = prevVal;
 }
 populateSourceSelect();
+if(urlSourceApplied){
+  document.getElementById('sourceSelect').value = 'custom';
+  document.getElementById('tabName').value = sheetName;
+}
 
 document.getElementById('sourceSelect').addEventListener('change', (e)=>{
   const val = e.target.value;
@@ -344,6 +369,22 @@ document.getElementById('sourceSelect').addEventListener('change', (e)=>{
 document.getElementById('manageSourcesBtn').addEventListener('click', ()=>{
   const panel = document.getElementById('addSourcePanel');
   panel.style.display = panel.style.display === 'none' ? 'flex' : 'none';
+});
+
+document.getElementById('shareLinkBtn').addEventListener('click', async ()=>{
+  if(!sheetId){ setStatus('Load a sheet first, then share the link.', true); return; }
+  const url = new URL(window.location.href);
+  url.search = ''; // drop any old params first
+  url.searchParams.set('sheet', sheetId);
+  url.searchParams.set('tab', sheetName || 'Escalation');
+  const shareUrl = url.toString();
+  try{
+    await navigator.clipboard.writeText(shareUrl);
+    setStatus('Share link copied to clipboard — this link shows the same data on any device. ' + shareUrl);
+  } catch(e){
+    // Clipboard API blocked (e.g. insecure context) — fall back to showing the link so it can be copied manually.
+    setStatus('Could not copy automatically. Share link: ' + shareUrl, true);
+  }
 });
 
 document.getElementById('saveSourceBtn').addEventListener('click', ()=>{
@@ -530,7 +571,7 @@ function fmtDate(d){
   return d.toLocaleDateString('en-GB', {day:'2-digit', month:'short', year:'numeric'});
 }
 
-function renderBars(container, counts){
+function renderBars(container, counts, pctTotal){
   container.innerHTML = '';
   const entries = Object.entries(counts).sort((a,b)=>b[1]-a[1]).slice(0,8);
   const max = entries.length ? entries[0][1] : 1;
@@ -538,9 +579,10 @@ function renderBars(container, counts){
   entries.forEach(([name,count])=>{
     const row = document.createElement('div');
     row.className = 'bar-row';
+    const pctText = pctTotal ? ` <span style="color:var(--muted);">(${(count/pctTotal*100).toFixed(0)}%)</span>` : '';
     row.innerHTML = `<div class="name" title="${name}">${name}</div>
       <div class="bar-track"><div class="bar-fill" style="width:${(count/max*100).toFixed(0)}%"></div></div>
-      <div class="cnt">${count}</div>`;
+      <div class="cnt">${count}${pctText}</div>`;
     container.appendChild(row);
   });
 }
@@ -794,7 +836,7 @@ function renderAll(){
   renderSlaChart(stats.match, stats.breach);
   renderBars(document.getElementById('catBars'), stats.catCounts);
   renderBars(document.getElementById('reasonBars'), stats.reasonCounts);
-  renderBars(document.getElementById('shortRemarksBars'), stats.shortRemarksCounts);
+  renderBars(document.getElementById('shortRemarksBars'), stats.shortRemarksCounts, stats.total);
   renderTrendChart(rows);
 
   const tableRows = agingFilter ? rows.filter(r => getAgingBucket(r) === agingFilter) : rows;
