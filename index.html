@@ -323,11 +323,19 @@ function parseGvizDate(v){
 
 async function fetchTable(id, tab){
   const url = `https://docs.google.com/spreadsheets/d/${id}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(tab)}`;
-  const res = await fetch(url);
-  if(!res.ok) throw new Error('Could not reach the sheet. Check the link and sharing setting.');
+  let res;
+  try{
+    res = await fetch(url);
+  } catch(networkErr){
+    throw new Error('Network/CORS blocked the request — try opening this file in a real browser tab (not a sandboxed preview), or check your internet connection.');
+  }
+  if(res.status === 400 || res.status === 404){
+    throw new Error('Sheet or tab not found. Check the sheet ID and tab name ("' + tab + '").');
+  }
+  if(!res.ok) throw new Error('Could not reach the sheet (HTTP ' + res.status + '). Make sure sharing is set to "Anyone with the link – Viewer".');
   const text = await res.text();
   const m = text.match(/setResponse\(([\s\S]*)\);?\s*$/);
-  if(!m) throw new Error('Sheet is not publicly viewable, or the tab name is wrong.');
+  if(!m) throw new Error('Sheet is not publicly viewable, or the tab name is wrong. Set sharing to "Anyone with the link – Viewer".');
   const json = JSON.parse(m[1]);
   return json.table;
 }
