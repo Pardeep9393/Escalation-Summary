@@ -218,7 +218,7 @@
 <section class="grid2">
   <div class="card">
     <h2>SLA Split (Closed Cases)</h2>
-    <div class="chart-box"><canvas id="slaChart"></canvas></div>
+    <div class="chart-box" id="slaChartBox"><canvas id="slaChart"></canvas></div>
   </div>
   <div class="card">
     <h2>By Category &amp; Escalation Reason</h2>
@@ -578,11 +578,11 @@ function renderTable(rows, filter){
 }
 
 function renderSlaChart(match, breach){
-  const ctx = document.getElementById('slaChart');
+  const box = document.getElementById('slaChartBox');
   if(typeof Chart === 'undefined'){
     // Chart.js didn't load (CDN blocked in this environment) — fall back to plain numbers
     // instead of crashing the whole dashboard.
-    const box = ctx.parentElement;
+    slaChartInstance = null;
     box.innerHTML = `<div style="display:flex; flex-direction:column; justify-content:center; align-items:center; height:100%; gap:6px;">
       <div style="color:var(--green); font-family:'Barlow Condensed',sans-serif; font-size:28px; font-weight:700;">${match} Match</div>
       <div style="color:var(--red); font-family:'Barlow Condensed',sans-serif; font-size:28px; font-weight:700;">${breach} Breach</div>
@@ -590,7 +590,13 @@ function renderSlaChart(match, breach){
     </div>`;
     return;
   }
-  if(slaChartInstance) slaChartInstance.destroy();
+  // Chart.js is available — make sure the canvas actually exists (it may have been
+  // replaced by the fallback markup above on an earlier render) before drawing on it.
+  if(slaChartInstance){ slaChartInstance.destroy(); slaChartInstance = null; }
+  if(!document.getElementById('slaChart')){
+    box.innerHTML = '<canvas id="slaChart"></canvas>';
+  }
+  const ctx = document.getElementById('slaChart');
   slaChartInstance = new Chart(ctx, {
     type: 'doughnut',
     data: {
