@@ -283,6 +283,30 @@
   </div>
 </section>
 
+<section class="table-card" style="margin-top:22px;">
+  <div class="table-head">
+    <h2>All Clients — Aging-wise Pending Summary</h2>
+    <span id="clientSummaryStatus" style="font-size:12px; color:var(--muted);"></span>
+  </div>
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>Client Name</th>
+          <th>1–2 days</th>
+          <th>3–5 days</th>
+          <th>6–10 days</th>
+          <th>&gt; 10 days</th>
+          <th>Total Pending</th>
+          <th>Total Escalations</th>
+        </tr>
+      </thead>
+      <tbody id="clientSummaryBody"></tbody>
+    </table>
+    <div class="empty-state" id="clientSummaryEmpty" style="display:none;">No sources configured. Add sources above to see the cross-client summary.</div>
+  </div>
+</section>
+
 <footer>Auto-refreshes every 5 minutes · Built for management review · Requires sheet sharing set to "Anyone with the link – Viewer"</footer>
 
 <script>
@@ -412,6 +436,7 @@ document.getElementById('saveSourceBtn').addEventListener('click', ()=>{
 
   sheetId = id; sheetName = tab;
   loadData();
+  loadClientSummary();
 });
 
 document.getElementById('removeSourceBtn').addEventListener('click', ()=>{
@@ -434,6 +459,7 @@ document.getElementById('removeSourceBtn').addEventListener('click', ()=>{
     renderAll();
     setStatus('No sources left. Add a Google Sheet source above to get started.', true);
   }
+  loadClientSummary();
 });
 
 function extractSheetId(url){
@@ -875,6 +901,67 @@ async function loadData(){
   }
 }
 
+async function loadClientSummary(){
+  const statusEl = document.getElementById('clientSummaryStatus');
+  const tbody = document.getElementById('clientSummaryBody');
+  const emptyEl = document.getElementById('clientSummaryEmpty');
+
+  if(!SOURCES.length){
+    tbody.innerHTML = '';
+    emptyEl.style.display = 'block';
+    statusEl.textContent = '';
+    return;
+  }
+  emptyEl.style.display = 'none';
+  statusEl.textContent = 'Loading ' + SOURCES.length + ' client(s)…';
+
+  const results = await Promise.all(SOURCES.map(async (s)=>{
+    try{
+      const table = await fetchTable(s.id, s.tab);
+      const rows = buildRows(table);
+      const agg = {b12:0,b35:0,b610:0,b10p:0, totalPending:0, totalEsc:0};
+      const uniqueOrders = new Set();
+      rows.forEach(r=>{
+        if(r.orderId) uniqueOrders.add(r.orderId);
+        if(!r.uploadDate){
+          agg.totalPending++;
+          const bucket = getAgingBucket(r);
+          if(bucket) agg[bucket]++;
+        }
+      });
+      agg.totalEsc = uniqueOrders.size;
+      return { name: s.name, ok: true, agg };
+    } catch(err){
+      return { name: s.name, ok: false, error: err.message || 'Failed to load' };
+    }
+  }));
+
+  tbody.innerHTML = '';
+  results.forEach(r=>{
+    const tr = document.createElement('tr');
+    if(!r.ok){
+      tr.innerHTML = `
+        <td>${r.name}</td>
+        <td colspan="6" style="color:var(--red); font-size:12px;">${r.error}</td>
+      `;
+    } else {
+      const a = r.agg;
+      tr.innerHTML = `
+        <td>${r.name}</td>
+        <td class="mono">${a.b12}</td>
+        <td class="mono">${a.b35}</td>
+        <td class="mono">${a.b610}</td>
+        <td class="mono">${a.b10p}</td>
+        <td class="mono" style="font-weight:600;">${a.totalPending}</td>
+        <td class="mono">${a.totalEsc}</td>
+      `;
+    }
+    tbody.appendChild(tr);
+  });
+
+  statusEl.textContent = 'Last updated ' + new Date().toLocaleTimeString('en-IN');
+}
+
 document.getElementById('loadBtn').addEventListener('click', ()=>{
   const url = document.getElementById('sheetUrl').value.trim();
   const tab = document.getElementById('tabName').value.trim() || 'Escalation';
@@ -909,7 +996,9 @@ document.getElementById('agingFilterClear').addEventListener('click', (e)=>{
 });
 
 loadData();
+loadClientSummary();
 setInterval(loadData, 5*60*1000);
+setInterval(loadClientSummary, 5*60*1000);
 </script>
 </body>
 </html>
