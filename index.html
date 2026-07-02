@@ -120,6 +120,7 @@
   .badge.pending{ background: rgba(255,176,32,0.15); color: var(--amber); }
   a.linkcell{ color: var(--blue); text-decoration:none; }
   a.linkcell:hover{ text-decoration:underline; }
+  .link-list{ display:flex; flex-direction:column; gap:4px; }
   .empty-state{ text-align:center; color: var(--muted); padding: 40px 0; font-size: 13px; }
 
   footer{ margin-top: 24px; text-align:center; color: var(--muted); font-size: 11px; }
@@ -141,7 +142,8 @@
   </div>
   <div>
     <div class="controls">
-      <input id="sheetUrl" type="text" placeholder="Paste Google Sheet link here" />
+      <select id="sourceSelect" style="background: var(--panel-2); border:1px solid var(--line); color: var(--text); padding: 9px 12px; border-radius: 8px; font-size: 13px; font-family:'Inter',sans-serif; min-width:160px;"></select>
+      <input id="sheetUrl" type="text" placeholder="Or paste a Google Sheet link here" />
       <input id="tabName" type="text" placeholder="Tab name" value="Escalation" style="min-width:120px" />
       <button id="loadBtn">Load</button>
       <button class="btn-ghost" id="refreshBtn">↻ Refresh</button>
@@ -253,10 +255,45 @@
 <footer>Auto-refreshes every 5 minutes · Built for management review · Requires sheet sharing set to "Anyone with the link – Viewer"</footer>
 
 <script>
-let sheetId = '1ZcxxO5Eq4lcDNrFeQCfy-fn4BLY9UW5O93cU0MGwMeY';
-let sheetName = 'Escalation';
+// Add more named sheets here any time — just copy a line and change the values.
+// name  = label shown in the dropdown
+// id    = the long ID from the Google Sheet URL (the part between /d/ and /edit)
+// tab   = the sheet tab name to read
+const SOURCES = [
+  { name: 'PILGRIM', id: '1ZcxxO5Eq4lcDNrFeQCfy-fn4BLY9UW5O93cU0MGwMeY', tab: 'Escalation' },
+];
+
+let sheetId = SOURCES[0].id;
+let sheetName = SOURCES[0].tab;
 let allRows = [];
 let slaChartInstance = null;
+
+function populateSourceSelect(){
+  const sel = document.getElementById('sourceSelect');
+  sel.innerHTML = '';
+  SOURCES.forEach((s, i)=>{
+    const opt = document.createElement('option');
+    opt.value = i;
+    opt.textContent = s.name;
+    sel.appendChild(opt);
+  });
+  const customOpt = document.createElement('option');
+  customOpt.value = 'custom';
+  customOpt.textContent = 'Custom link…';
+  sel.appendChild(customOpt);
+}
+populateSourceSelect();
+
+document.getElementById('sourceSelect').addEventListener('change', (e)=>{
+  const val = e.target.value;
+  if(val === 'custom') return;
+  const s = SOURCES[+val];
+  sheetId = s.id;
+  sheetName = s.tab;
+  document.getElementById('sheetUrl').value = '';
+  document.getElementById('tabName').value = s.tab;
+  loadData();
+});
 
 function extractSheetId(url){
   const m = url.match(/\/d\/([a-zA-Z0-9-_]+)/);
@@ -303,6 +340,16 @@ function cellText(row, i){
   const c = cellVal(row, i);
   if(!c) return '';
   return (c.v ?? c.f ?? '').toString().trim();
+}
+
+function parseLinks(text){
+  if(!text) return [];
+  // Split on common separators people use when pasting multiple links: comma, semicolon,
+  // pipe, whitespace/newlines — then keep only chunks that look like URLs.
+  const parts = text.split(/[,;|\s]+/).map(s=>s.trim()).filter(Boolean);
+  const urls = parts.filter(p => /^(https?:\/\/|www\.)/i.test(p));
+  // de-duplicate while preserving order
+  return [...new Set(urls)];
 }
 
 function buildRows(table){
@@ -427,7 +474,15 @@ function renderTable(rows, filter){
       statusBadge = isMatch ? `<span class="badge match">SLA Match</span>` : `<span class="badge breach">SLA Breach</span>`;
       ageCell = hours!=null ? `${Math.round(hours)} hrs` : '—';
     }
-    const linkCell = r.link ? `<a class="linkcell mono" href="${r.link}" target="_blank" rel="noopener">Open ↗</a>` : '—';
+    const links = parseLinks(r.link);
+    let linkCell = '—';
+    if(links.length === 1){
+      linkCell = `<a class="linkcell mono" href="${links[0]}" target="_blank" rel="noopener">Open ↗</a>`;
+    } else if(links.length > 1){
+      linkCell = `<div class="link-list">` + links.map((u,i)=>
+        `<a class="linkcell mono" href="${u}" target="_blank" rel="noopener">Open ${i+1} ↗</a>`
+      ).join('') + `</div>`;
+    }
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td class="mono">${r.orderId || '—'}</td>
@@ -507,14 +562,15 @@ document.getElementById('loadBtn').addEventListener('click', ()=>{
   const tab = document.getElementById('tabName').value.trim() || 'Escalation';
   const id = url ? extractSheetId(url) : null;
   if(url && !id){ setStatus('Could not read a sheet ID from that link.', true); return; }
-  if(id) sheetId = id;
+  if(id){
+    sheetId = id;
+    document.getElementById('sourceSelect').value = 'custom';
+  }
   sheetName = tab;
   loadData();
 });
 document.getElementById('refreshBtn').addEventListener('click', loadData);
 document.getElementById('search').addEventListener('input', (e)=> renderTable(allRows, e.target.value));
-
-document.getElementById('sheetUrl').value = 'https://docs.google.com/spreadsheets/d/1ZcxxO5Eq4lcDNrFeQCfy-fn4BLY9UW5O93cU0MGwMeY/edit';
 
 loadData();
 setInterval(loadData, 5*60*1000);
