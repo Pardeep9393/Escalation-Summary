@@ -147,8 +147,17 @@
       <input id="tabName" type="text" placeholder="Tab name" value="Escalation" style="min-width:120px" />
       <button id="loadBtn">Load</button>
       <button class="btn-ghost" id="refreshBtn">↻ Refresh</button>
+      <button class="btn-ghost" id="manageSourcesBtn">+ Add source</button>
     </div>
     <div id="status">Loading…</div>
+    <div id="addSourcePanel" style="display:none; margin-top:10px; background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:12px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+      <input id="newSourceName" type="text" placeholder="Name (e.g. Pilgrim)" style="min-width:140px" />
+      <input id="newSourceId" type="text" placeholder="Sheet ID or full link" style="min-width:280px" />
+      <input id="newSourceTab" type="text" placeholder="Tab name" value="Escalation" style="min-width:120px" />
+      <button id="saveSourceBtn">Save</button>
+      <button class="btn-ghost" id="removeSourceBtn">Remove selected</button>
+      <span style="font-size:11px; color:var(--muted); width:100%;">Saved sources are stored in this browser and show up in the dropdown above.</span>
+    </div>
   </div>
 </header>
 
@@ -259,9 +268,23 @@
 // name  = label shown in the dropdown
 // id    = the long ID from the Google Sheet URL (the part between /d/ and /edit)
 // tab   = the sheet tab name to read
-const SOURCES = [
+const DEFAULT_SOURCES = [
   { name: 'PILGRIM', id: '1ZcxxO5Eq4lcDNrFeQCfy-fn4BLY9UW5O93cU0MGwMeY', tab: 'Escalation' },
 ];
+
+const CUSTOM_SOURCES_KEY = 'escalationDashboard.customSources';
+
+function loadCustomSources(){
+  try{
+    const raw = localStorage.getItem(CUSTOM_SOURCES_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch(e){ return []; }
+}
+function saveCustomSources(list){
+  try{ localStorage.setItem(CUSTOM_SOURCES_KEY, JSON.stringify(list)); } catch(e){}
+}
+
+let SOURCES = [...DEFAULT_SOURCES, ...loadCustomSources()];
 
 let sheetId = SOURCES[0].id;
 let sheetName = SOURCES[0].tab;
@@ -270,6 +293,7 @@ let slaChartInstance = null;
 
 function populateSourceSelect(){
   const sel = document.getElementById('sourceSelect');
+  const prevVal = sel.value;
   sel.innerHTML = '';
   SOURCES.forEach((s, i)=>{
     const opt = document.createElement('option');
@@ -281,6 +305,7 @@ function populateSourceSelect(){
   customOpt.value = 'custom';
   customOpt.textContent = 'Custom link…';
   sel.appendChild(customOpt);
+  if(prevVal && [...sel.options].some(o=>o.value===prevVal)) sel.value = prevVal;
 }
 populateSourceSelect();
 
@@ -292,6 +317,51 @@ document.getElementById('sourceSelect').addEventListener('change', (e)=>{
   sheetName = s.tab;
   document.getElementById('sheetUrl').value = '';
   document.getElementById('tabName').value = s.tab;
+  loadData();
+});
+
+document.getElementById('manageSourcesBtn').addEventListener('click', ()=>{
+  const panel = document.getElementById('addSourcePanel');
+  panel.style.display = panel.style.display === 'none' ? 'flex' : 'none';
+});
+
+document.getElementById('saveSourceBtn').addEventListener('click', ()=>{
+  const name = document.getElementById('newSourceName').value.trim();
+  const idOrUrl = document.getElementById('newSourceId').value.trim();
+  const tab = document.getElementById('newSourceTab').value.trim() || 'Escalation';
+  if(!name || !idOrUrl){ setStatus('Enter both a name and a sheet ID/link to save a source.', true); return; }
+  const id = idOrUrl.includes('/') ? extractSheetId(idOrUrl) : idOrUrl;
+  if(!id){ setStatus('Could not read a sheet ID from that value.', true); return; }
+
+  const custom = loadCustomSources();
+  const existingIdx = custom.findIndex(s => s.name.toLowerCase() === name.toLowerCase());
+  const entry = { name, id, tab };
+  if(existingIdx >= 0) custom[existingIdx] = entry; else custom.push(entry);
+  saveCustomSources(custom);
+
+  SOURCES = [...DEFAULT_SOURCES, ...custom];
+  populateSourceSelect();
+  const newIndex = SOURCES.findIndex(s => s.name === name && s.id === id);
+  document.getElementById('sourceSelect').value = newIndex;
+  document.getElementById('newSourceName').value = '';
+  document.getElementById('newSourceId').value = '';
+
+  sheetId = id; sheetName = tab;
+  loadData();
+});
+
+document.getElementById('removeSourceBtn').addEventListener('click', ()=>{
+  const sel = document.getElementById('sourceSelect');
+  if(sel.value === 'custom'){ setStatus('Nothing to remove — "Custom link" is not a saved source.', true); return; }
+  const s = SOURCES[+sel.value];
+  const isDefault = DEFAULT_SOURCES.some(d => d.id === s.id && d.name === s.name);
+  if(isDefault){ setStatus('Default sources can\'t be removed here — edit DEFAULT_SOURCES in the code instead.', true); return; }
+  const custom = loadCustomSources().filter(c => !(c.name === s.name && c.id === s.id));
+  saveCustomSources(custom);
+  SOURCES = [...DEFAULT_SOURCES, ...custom];
+  populateSourceSelect();
+  sheetId = SOURCES[0].id; sheetName = SOURCES[0].tab;
+  document.getElementById('sourceSelect').value = 0;
   loadData();
 });
 
@@ -509,6 +579,17 @@ function renderTable(rows, filter){
 
 function renderSlaChart(match, breach){
   const ctx = document.getElementById('slaChart');
+  if(typeof Chart === 'undefined'){
+    // Chart.js didn't load (CDN blocked in this environment) — fall back to plain numbers
+    // instead of crashing the whole dashboard.
+    const box = ctx.parentElement;
+    box.innerHTML = `<div style="display:flex; flex-direction:column; justify-content:center; align-items:center; height:100%; gap:6px;">
+      <div style="color:var(--green); font-family:'Barlow Condensed',sans-serif; font-size:28px; font-weight:700;">${match} Match</div>
+      <div style="color:var(--red); font-family:'Barlow Condensed',sans-serif; font-size:28px; font-weight:700;">${breach} Breach</div>
+      <div style="color:var(--muted); font-size:11px;">Chart library failed to load</div>
+    </div>`;
+    return;
+  }
   if(slaChartInstance) slaChartInstance.destroy();
   slaChartInstance = new Chart(ctx, {
     type: 'doughnut',
