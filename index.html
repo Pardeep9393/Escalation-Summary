@@ -1,0 +1,1004 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Escalation Control — SLA Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<style>
+  :root{
+    --bg: #0f1620;
+    --panel: #161f2c;
+    --panel-2: #1c2734;
+    --line: #2a3644;
+    --text: #eef2f6;
+    --muted: #8b98a8;
+    --amber: #ffb020;
+    --green: #2bd4a0;
+    --red: #ff5a5f;
+    --blue: #4fa3ff;
+    --radius: 10px;
+  }
+  *{ box-sizing: border-box; }
+  html,body{ margin:0; padding:0; }
+  body{
+    background: radial-gradient(1200px 600px at 10% -10%, #16202c 0%, var(--bg) 55%) fixed;
+    color: var(--text);
+    font-family: 'Inter', sans-serif;
+    min-height: 100vh;
+    padding: 28px 32px 60px;
+  }
+  .mono{ font-family: 'JetBrains Mono', monospace; }
+  .display{ font-family: 'Barlow Condensed', sans-serif; text-transform: uppercase; letter-spacing: 0.02em; }
+
+  /* Top bar */
+  header{
+    display:flex; justify-content: space-between; align-items: flex-end;
+    flex-wrap: wrap; gap: 18px;
+    padding-bottom: 20px; margin-bottom: 22px;
+    border-bottom: 1px solid var(--line);
+  }
+  .eyebrow{ font-size: 12px; color: var(--amber); letter-spacing: 0.16em; font-weight:600; margin-bottom: 6px; }
+  h1{ font-family:'Barlow Condensed', sans-serif; font-weight:700; text-transform:uppercase; letter-spacing: 0.01em; font-size: 34px; margin:0; }
+  .sub{ color: var(--muted); font-size: 13px; margin-top:4px; }
+
+  .controls{ display:flex; align-items:center; gap: 10px; flex-wrap: wrap; }
+  .controls input{
+    background: var(--panel-2); border:1px solid var(--line); color: var(--text);
+    padding: 9px 12px; border-radius: 8px; font-size: 13px; font-family:'JetBrains Mono',monospace;
+    min-width: 260px;
+  }
+  .controls input:focus{ outline:2px solid var(--blue); outline-offset: 1px; }
+  button{
+    background: var(--blue); color: #071018; border:none; font-weight:600;
+    padding: 10px 16px; border-radius: 8px; cursor:pointer; font-size: 13px;
+    font-family:'Inter',sans-serif;
+  }
+  button:hover{ filter: brightness(1.08); }
+  button:focus-visible, input:focus-visible{ outline:2px solid var(--blue); outline-offset:2px; }
+  .btn-ghost{ background: transparent; border:1px solid var(--line); color: var(--text); }
+  #status{ font-size: 12px; color: var(--muted); margin-top: 6px; }
+  #status.err{ color: var(--red); }
+
+  /* KPI row */
+  .kpis{ display:grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin-bottom: 22px; }
+  .kpi{
+    background: var(--panel); border:1px solid var(--line); border-radius: var(--radius);
+    padding: 18px 18px 14px;
+  }
+  .kpi .label{ font-size: 11px; color: var(--muted); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:8px; }
+  .kpi .value{ font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size: 40px; line-height: 1; }
+  .kpi .value.green{ color: var(--green); }
+  .kpi .value.red{ color: var(--red); }
+  .kpi .value.amber{ color: var(--amber); }
+  .kpi .foot{ font-size: 11px; color: var(--muted); margin-top: 8px; }
+
+  /* Conveyor / signature element */
+  .conveyor-wrap{
+    background: var(--panel); border:1px solid var(--line); border-radius: var(--radius);
+    padding: 20px 22px 22px; margin-bottom: 22px;
+  }
+  .conveyor-title{ display:flex; justify-content: space-between; align-items:baseline; margin-bottom: 16px;}
+  .conveyor-title h2{ font-family:'Barlow Condensed',sans-serif; text-transform:uppercase; font-size:18px; margin:0; letter-spacing:0.03em; }
+  .conveyor-title span{ font-size: 11px; color: var(--muted); }
+  .belt{ position:relative; height: 10px; background: var(--panel-2); border-radius: 6px; overflow:hidden; display:flex; border:1px solid var(--line); }
+  .belt .seg{ height: 100%; }
+  .stages{ display:grid; grid-template-columns: repeat(4,1fr); gap: 14px; margin-top: 16px; }
+  .stage{ border-left: 3px solid var(--line); padding-left: 12px; cursor:pointer; border-radius: 4px; transition: background 0.15s; padding-top:6px; padding-bottom:6px; padding-right:6px; }
+  .stage:hover{ background: var(--panel-2); }
+  .stage.active{ background: var(--panel-2); box-shadow: inset 0 0 0 1px var(--line); }
+  .stage .n{ font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size: 30px; line-height:1; }
+  .stage .lbl{ font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+  /* charts row */
+  .grid2{ display:grid; grid-template-columns: 1fr 1.4fr; gap: 16px; margin-bottom: 22px; }
+  .card{ background: var(--panel); border:1px solid var(--line); border-radius: var(--radius); padding: 18px 20px; }
+  .card h2{ font-family:'Barlow Condensed',sans-serif; text-transform:uppercase; font-size:16px; margin:0 0 14px; letter-spacing:0.03em; color: var(--muted); }
+  .chart-box{ position:relative; height: 220px; }
+
+  .bar-row{ display:flex; align-items:center; gap: 10px; margin-bottom: 10px; font-size: 13px; }
+  .bar-row .name{ width: 150px; flex-shrink:0; color: var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .bar-track{ flex:1; background: var(--panel-2); border-radius: 4px; height: 10px; overflow:hidden; }
+  .bar-fill{ height:100%; background: var(--blue); border-radius: 4px; }
+  .bar-row .cnt{ min-width: 30px; flex-shrink:0; text-align:right; color: var(--muted); font-family:'JetBrains Mono',monospace; font-size:12px; white-space:nowrap; }
+
+  /* table */
+  .table-card{ background: var(--panel); border:1px solid var(--line); border-radius: var(--radius); padding: 18px 20px; }
+  .table-head{ display:flex; justify-content: space-between; align-items:center; margin-bottom: 14px; flex-wrap: wrap; gap: 10px; }
+  .table-head h2{ font-family:'Barlow Condensed',sans-serif; text-transform:uppercase; font-size:16px; margin:0; color: var(--muted); }
+  table{ width:100%; border-collapse: collapse; font-size: 13px; }
+  thead th{
+    text-align:left; font-size: 11px; text-transform:uppercase; letter-spacing:0.05em;
+    color: var(--muted); border-bottom: 1px solid var(--line); padding: 8px 10px; position: sticky; top:0; background: var(--panel);
+  }
+  tbody td{ padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tbody tr:hover{ background: var(--panel-2); }
+  .table-scroll{ max-height: 480px; overflow:auto; }
+  .badge{ display:inline-block; padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight:600; }
+  .badge.match{ background: rgba(43,212,160,0.15); color: var(--green); }
+  .badge.breach{ background: rgba(255,90,95,0.15); color: var(--red); }
+  .badge.pending{ background: rgba(255,176,32,0.15); color: var(--amber); }
+  a.linkcell{ color: var(--blue); text-decoration:none; }
+  a.linkcell:hover{ text-decoration:underline; }
+  .link-list{ display:flex; flex-direction:column; gap:4px; }
+  .empty-state{ text-align:center; color: var(--muted); padding: 40px 0; font-size: 13px; }
+
+  footer{ margin-top: 24px; text-align:center; color: var(--muted); font-size: 11px; }
+
+  @media (max-width: 1000px){
+    .kpis{ grid-template-columns: repeat(2,1fr); }
+    .stages{ grid-template-columns: repeat(2,1fr); }
+    .grid2{ grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <div class="eyebrow">Warehouse Ops · Escalation Tracker</div>
+    <h1>Escalation Control</h1>
+    <div class="sub">Live SLA read‑out from Google Sheets · sheet tab: <strong>Escalation</strong></div>
+  </div>
+  <div>
+    <div class="controls">
+      <select id="sourceSelect" style="background: var(--panel-2); border:1px solid var(--line); color: var(--text); padding: 9px 12px; border-radius: 8px; font-size: 13px; font-family:'Inter',sans-serif; min-width:160px;"></select>
+      <input id="sheetUrl" type="text" placeholder="Or paste a Google Sheet link here" />
+      <input id="tabName" type="text" placeholder="Tab name" value="Escalation" style="min-width:120px" />
+      <button id="loadBtn">Load</button>
+      <button class="btn-ghost" id="refreshBtn">↻ Refresh</button>
+      <button class="btn-ghost" id="manageSourcesBtn">+ Add source</button>
+      <button class="btn-ghost" id="shareLinkBtn">🔗 Copy Share Link</button>
+      <select id="monthFilter" style="background: var(--panel-2); border:1px solid var(--line); color: var(--text); padding: 9px 12px; border-radius: 8px; font-size: 13px; font-family:'Inter',sans-serif; min-width:150px;">
+        <option value="all">All Months (Received)</option>
+      </select>
+    </div>
+    <div id="status">Loading…</div>
+    <div id="addSourcePanel" style="display:none; margin-top:10px; background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:12px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+      <input id="newSourceName" type="text" placeholder="Name (e.g. Pilgrim)" style="min-width:140px" />
+      <input id="newSourceId" type="text" placeholder="Sheet ID or full link" style="min-width:280px" />
+      <input id="newSourceTab" type="text" placeholder="Tab name" value="Escalation" style="min-width:120px" />
+      <button id="saveSourceBtn">Save</button>
+      <button class="btn-ghost" id="removeSourceBtn">Remove selected</button>
+      <span style="font-size:11px; color:var(--muted); width:100%;">Saved sources are stored in this browser and show up in the dropdown above. Use "Copy Share Link" to send a link that works on any device without needing to re-add the source.</span>
+    </div>
+  </div>
+</header>
+
+<section class="kpis">
+  <div class="kpi">
+    <div class="label">Total Escalations</div>
+    <div class="value" id="kpiTotal">—</div>
+    <div class="foot">Unique Order IDs</div>
+  </div>
+  <div class="kpi">
+    <div class="label">Pending</div>
+    <div class="value amber" id="kpiPending">—</div>
+    <div class="foot">Upload Date blank</div>
+  </div>
+  <div class="kpi">
+    <div class="label">SLA Match</div>
+    <div class="value green" id="kpiMatch">—</div>
+    <div class="foot">Closed within 48 hrs</div>
+  </div>
+  <div class="kpi">
+    <div class="label">SLA Breach</div>
+    <div class="value red" id="kpiBreach">—</div>
+    <div class="foot">Closed after 48 hrs</div>
+  </div>
+  <div class="kpi">
+    <div class="label">SLA Adherence</div>
+    <div class="value" id="kpiSlaPct">—</div>
+    <div class="foot">Match ÷ (Match + Breach)</div>
+  </div>
+</section>
+
+<section class="conveyor-wrap">
+  <div class="conveyor-title">
+    <h2>Pending Aging Belt</h2>
+    <span>days since received, still open · as of today · click a bucket to filter table below</span>
+  </div>
+  <div class="belt" id="belt"></div>
+  <div class="stages" id="stages">
+    <div class="stage" id="stageBtn-b12" data-bucket="b12" style="border-color: var(--green)">
+      <div class="n" id="ag12">—</div>
+      <div class="lbl">1–2 days</div>
+    </div>
+    <div class="stage" id="stageBtn-b35" data-bucket="b35" style="border-color: var(--blue)">
+      <div class="n" id="ag35">—</div>
+      <div class="lbl">3–5 days</div>
+    </div>
+    <div class="stage" id="stageBtn-b610" data-bucket="b610" style="border-color: var(--amber)">
+      <div class="n" id="ag610">—</div>
+      <div class="lbl">6–10 days</div>
+    </div>
+    <div class="stage" id="stageBtn-b10p" data-bucket="b10p" style="border-color: var(--red)">
+      <div class="n" id="ag10p">—</div>
+      <div class="lbl">&gt; 10 days</div>
+    </div>
+  </div>
+  <div id="agingFilterNote" style="display:none; margin-top:12px; font-size:12px; color:var(--muted);">
+    Showing pending orders in <strong id="agingFilterLabel"></strong> · <a href="#" id="agingFilterClear" style="color:var(--blue); text-decoration:none;">Clear filter ✕</a>
+  </div>
+</section>
+
+<section class="grid2">
+  <div class="card">
+    <h2>SLA Split (Closed Cases)</h2>
+    <div class="chart-box" id="slaChartBox"><canvas id="slaChart"></canvas></div>
+  </div>
+  <div class="card">
+    <h2>By Category, Reason &amp; Short Remarks</h2>
+    <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:20px;">
+      <div>
+        <div class="sub" style="margin-bottom:8px; color:var(--muted); font-size:11px; text-transform:uppercase;">Category</div>
+        <div id="catBars"></div>
+      </div>
+      <div>
+        <div class="sub" style="margin-bottom:8px; color:var(--muted); font-size:11px; text-transform:uppercase;">Escalation Reason</div>
+        <div id="reasonBars"></div>
+      </div>
+      <div>
+        <div class="sub" style="margin-bottom:8px; color:var(--muted); font-size:11px; text-transform:uppercase;">Short Remarks (% of Total Escalations)</div>
+        <div id="shortRemarksBars"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="conveyor-wrap">
+  <div class="conveyor-title">
+    <h2>Received vs Processed — Day-wise</h2>
+    <span>trend line · received date vs upload date, filtered by month above</span>
+  </div>
+  <div class="chart-box" id="trendChartBox" style="height:280px;"><canvas id="trendChart"></canvas></div>
+</section>
+
+<section class="table-card">
+  <div class="table-head">
+    <h2>All Escalations</h2>
+    <input id="search" type="text" placeholder="Search order id / reason / category…" style="background:var(--panel-2); border:1px solid var(--line); color:var(--text); padding:8px 12px; border-radius:8px; font-size:13px; min-width:240px;" />
+  </div>
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>Order ID</th>
+          <th>Received</th>
+          <th>Upload Date</th>
+          <th>Status</th>
+          <th>Age / TAT</th>
+          <th>Category</th>
+          <th>Escalation Reason</th>
+          <th>Warehouse Remarks</th>
+          <th>Short Remarks</th>
+          <th>Link</th>
+        </tr>
+      </thead>
+      <tbody id="tblBody"></tbody>
+    </table>
+    <div class="empty-state" id="emptyState" style="display:none;">No matching rows.</div>
+  </div>
+</section>
+
+<section class="table-card" style="margin-top:22px;">
+  <div class="table-head">
+    <h2>All Clients — Aging-wise Pending Summary</h2>
+    <span id="clientSummaryStatus" style="font-size:12px; color:var(--muted);"></span>
+  </div>
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>Client Name</th>
+          <th>1–2 days</th>
+          <th>3–5 days</th>
+          <th>6–10 days</th>
+          <th>&gt; 10 days</th>
+          <th>Total Pending</th>
+          <th>Total Escalations</th>
+        </tr>
+      </thead>
+      <tbody id="clientSummaryBody"></tbody>
+    </table>
+    <div class="empty-state" id="clientSummaryEmpty" style="display:none;">No sources configured. Add sources above to see the cross-client summary.</div>
+  </div>
+</section>
+
+<footer>Auto-refreshes every 5 minutes · Built for management review · Requires sheet sharing set to "Anyone with the link – Viewer"</footer>
+
+<script>
+// Add more named sheets here any time — just copy a line and change the values.
+// name  = label shown in the dropdown
+// id    = the long ID from the Google Sheet URL (the part between /d/ and /edit)
+// tab   = the sheet tab name to read
+const DEFAULT_SOURCES = [
+  { name: 'PILGRIM', id: '1ZcxxO5Eq4lcDNrFeQCfy-fn4BLY9UW5O93cU0MGwMeY', tab: 'Escalation' },
+];
+
+const CUSTOM_SOURCES_KEY = 'escalationDashboard.customSources';
+
+function loadCustomSources(){
+  try{
+    const raw = localStorage.getItem(CUSTOM_SOURCES_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch(e){ return []; }
+}
+function saveCustomSources(list){
+  try{ localStorage.setItem(CUSTOM_SOURCES_KEY, JSON.stringify(list)); } catch(e){}
+}
+
+let SOURCES = [...DEFAULT_SOURCES, ...loadCustomSources()];
+
+let sheetId = SOURCES[0] ? SOURCES[0].id : null;
+let sheetName = SOURCES[0] ? SOURCES[0].tab : null;
+let urlSourceApplied = false;
+
+// If the link was shared with ?sheet=...&tab=... in the URL, use that — this makes the
+// dashboard show the same data on ANY device/browser, since it doesn't depend on this
+// browser's localStorage having a saved source.
+(function applyUrlSource(){
+  try{
+    const params = new URLSearchParams(window.location.search);
+    const sheetParam = params.get('sheet');
+    const tabParam = params.get('tab');
+    if(sheetParam){
+      const id = sheetParam.includes('/') ? extractSheetId(sheetParam) : sheetParam;
+      if(id){
+        sheetId = id;
+        sheetName = tabParam || 'Escalation';
+        urlSourceApplied = true;
+      }
+    }
+  } catch(e){ /* URL parsing not available — ignore, fall back to default/local source */ }
+})();
+let allRows = [];
+let agingFilter = null; // 'b12' | 'b35' | 'b610' | 'b10p' | null
+let slaChartInstance = null;
+let trendChartInstance = null;
+
+function populateSourceSelect(){
+  const sel = document.getElementById('sourceSelect');
+  const prevVal = sel.value;
+  sel.innerHTML = '';
+  SOURCES.forEach((s, i)=>{
+    const opt = document.createElement('option');
+    opt.value = i;
+    opt.textContent = s.name;
+    sel.appendChild(opt);
+  });
+  const customOpt = document.createElement('option');
+  customOpt.value = 'custom';
+  customOpt.textContent = 'Custom link…';
+  sel.appendChild(customOpt);
+  if(prevVal && [...sel.options].some(o=>o.value===prevVal)) sel.value = prevVal;
+}
+populateSourceSelect();
+if(urlSourceApplied){
+  document.getElementById('sourceSelect').value = 'custom';
+  document.getElementById('tabName').value = sheetName;
+}
+
+document.getElementById('sourceSelect').addEventListener('change', (e)=>{
+  const val = e.target.value;
+  if(val === 'custom') return;
+  const s = SOURCES[+val];
+  sheetId = s.id;
+  sheetName = s.tab;
+  document.getElementById('sheetUrl').value = '';
+  document.getElementById('tabName').value = s.tab;
+  loadData();
+});
+
+document.getElementById('manageSourcesBtn').addEventListener('click', ()=>{
+  const panel = document.getElementById('addSourcePanel');
+  panel.style.display = panel.style.display === 'none' ? 'flex' : 'none';
+});
+
+document.getElementById('shareLinkBtn').addEventListener('click', async ()=>{
+  if(!sheetId){ setStatus('Load a sheet first, then share the link.', true); return; }
+  const url = new URL(window.location.href);
+  url.search = ''; // drop any old params first
+  url.searchParams.set('sheet', sheetId);
+  url.searchParams.set('tab', sheetName || 'Escalation');
+  const shareUrl = url.toString();
+  try{
+    await navigator.clipboard.writeText(shareUrl);
+    setStatus('Share link copied to clipboard — this link shows the same data on any device. ' + shareUrl);
+  } catch(e){
+    // Clipboard API blocked (e.g. insecure context) — fall back to showing the link so it can be copied manually.
+    setStatus('Could not copy automatically. Share link: ' + shareUrl, true);
+  }
+});
+
+document.getElementById('saveSourceBtn').addEventListener('click', ()=>{
+  const name = document.getElementById('newSourceName').value.trim();
+  const idOrUrl = document.getElementById('newSourceId').value.trim();
+  const tab = document.getElementById('newSourceTab').value.trim() || 'Escalation';
+  if(!name || !idOrUrl){ setStatus('Enter both a name and a sheet ID/link to save a source.', true); return; }
+  const id = idOrUrl.includes('/') ? extractSheetId(idOrUrl) : idOrUrl;
+  if(!id){ setStatus('Could not read a sheet ID from that value.', true); return; }
+
+  const custom = loadCustomSources();
+  const existingIdx = custom.findIndex(s => s.name.toLowerCase() === name.toLowerCase());
+  const entry = { name, id, tab };
+  if(existingIdx >= 0) custom[existingIdx] = entry; else custom.push(entry);
+  saveCustomSources(custom);
+
+  SOURCES = [...DEFAULT_SOURCES, ...custom];
+  populateSourceSelect();
+  const newIndex = SOURCES.findIndex(s => s.name === name && s.id === id);
+  document.getElementById('sourceSelect').value = newIndex;
+  document.getElementById('newSourceName').value = '';
+  document.getElementById('newSourceId').value = '';
+
+  sheetId = id; sheetName = tab;
+  loadData();
+  loadClientSummary();
+});
+
+document.getElementById('removeSourceBtn').addEventListener('click', ()=>{
+  const sel = document.getElementById('sourceSelect');
+  if(sel.value === 'custom'){ setStatus('Nothing to remove — "Custom link" is not a saved source.', true); return; }
+  const s = SOURCES[+sel.value];
+  const isDefault = DEFAULT_SOURCES.some(d => d.id === s.id && d.name === s.name);
+  if(isDefault){ setStatus('Default sources can\'t be removed here — edit DEFAULT_SOURCES in the code instead.', true); return; }
+  const custom = loadCustomSources().filter(c => !(c.name === s.name && c.id === s.id));
+  saveCustomSources(custom);
+  SOURCES = [...DEFAULT_SOURCES, ...custom];
+  populateSourceSelect();
+  if(SOURCES[0]){
+    sheetId = SOURCES[0].id; sheetName = SOURCES[0].tab;
+    document.getElementById('sourceSelect').value = 0;
+    loadData();
+  } else {
+    sheetId = null; sheetName = null;
+    allRows = [];
+    renderAll();
+    setStatus('No sources left. Add a Google Sheet source above to get started.', true);
+  }
+  loadClientSummary();
+});
+
+function extractSheetId(url){
+  const m = url.match(/\/d\/([a-zA-Z0-9-_]+)/);
+  return m ? m[1] : null;
+}
+
+function normalize(s){ return (s||'').toString().toLowerCase().replace(/[^a-z0-9]/g,''); }
+
+function setStatus(msg, isErr){
+  const el = document.getElementById('status');
+  el.textContent = msg;
+  el.className = isErr ? 'err' : '';
+}
+
+function parseGvizDate(v){
+  if(v==null) return null;
+  if(typeof v === 'string'){
+    const m = v.match(/^Date\((\d+),(\d+),(\d+)(?:,(\d+),(\d+),(\d+))?\)$/);
+    if(m){
+      return new Date(+m[1], +m[2], +m[3], +(m[4]||0), +(m[5]||0), +(m[6]||0));
+    }
+    const d = new Date(v);
+    if(!isNaN(d)) return d;
+  }
+  return null;
+}
+
+async function fetchTable(id, tab){
+  const url = `https://docs.google.com/spreadsheets/d/${id}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(tab)}`;
+  let res;
+  try{
+    res = await fetch(url);
+  } catch(networkErr){
+    throw new Error('Network/CORS blocked the request — try opening this file in a real browser tab (not a sandboxed preview), or check your internet connection.');
+  }
+  if(res.status === 400 || res.status === 404){
+    throw new Error('Sheet or tab not found. Check the sheet ID and tab name ("' + tab + '").');
+  }
+  if(!res.ok) throw new Error('Could not reach the sheet (HTTP ' + res.status + '). Make sure sharing is set to "Anyone with the link – Viewer".');
+  const text = await res.text();
+  const m = text.match(/setResponse\(([\s\S]*)\);?\s*$/);
+  if(!m) throw new Error('Sheet is not publicly viewable, or the tab name is wrong. Set sharing to "Anyone with the link – Viewer".');
+  const json = JSON.parse(m[1]);
+  return json.table;
+}
+
+function cellVal(row, i){
+  if(i==null || !row.c || !row.c[i]) return null;
+  return row.c[i];
+}
+function cellText(row, i){
+  const c = cellVal(row, i);
+  if(!c) return '';
+  return (c.v ?? c.f ?? '').toString().trim();
+}
+
+function parseLinks(text){
+  if(!text) return [];
+  // Split on common separators people use when pasting multiple links: comma, semicolon,
+  // pipe, whitespace/newlines — then keep only chunks that look like URLs.
+  const parts = text.split(/[,;|\s]+/).map(s=>s.trim()).filter(Boolean);
+  const urls = parts.filter(p => /^(https?:\/\/|www\.)/i.test(p));
+  // de-duplicate while preserving order
+  return [...new Set(urls)];
+}
+
+function buildRows(table){
+  const colMap = {};
+  table.cols.forEach((c,i)=>{ colMap[normalize(c.label)] = i; });
+  const idx = {
+    date: colMap['date'],
+    reason: colMap['escalationreason'],
+    orderId: colMap['orderid'],
+    link: colMap['link'],
+    remarks: colMap['warehouseremarks'],
+    category: colMap['category'],
+    uploadDate: colMap['uploaddate'],
+    shortRemarks: colMap['shortremarks'],
+  };
+  const rows = [];
+  table.rows.forEach(r=>{
+    const dCell = cellVal(r, idx.date);
+    const uCell = cellVal(r, idx.uploadDate);
+    const receivedDate = dCell ? parseGvizDate(dCell.v) : null;
+    const uploadDate = uCell ? parseGvizDate(uCell.v) : null;
+    const orderId = cellText(r, idx.orderId);
+    if(!receivedDate && !orderId) return;
+    rows.push({
+      date: receivedDate,
+      reason: cellText(r, idx.reason),
+      orderId,
+      link: cellText(r, idx.link),
+      remarks: cellText(r, idx.remarks),
+      category: cellText(r, idx.category),
+      uploadDate,
+      shortRemarks: cellText(r, idx.shortRemarks),
+    });
+  });
+  return rows;
+}
+
+function getAgingBucket(r){
+  if(r.uploadDate || !r.date) return null; // only pending rows with a received date have an aging bucket
+  const now = new Date();
+  const days = Math.floor((now - r.date)/86400000);
+  if(days<=2) return 'b12';
+  if(days<=5) return 'b35';
+  if(days<=10) return 'b610';
+  return 'b10p';
+}
+const AGING_LABELS = {b12:'1–2 days', b35:'3–5 days', b610:'6–10 days', b10p:'> 10 days'};
+
+function computeStats(rows){
+  const uniqueOrders = new Set(rows.map(r=>r.orderId).filter(Boolean));
+  let match=0, breach=0, pending=0;
+  const aging = {b12:0,b35:0,b610:0,b10p:0};
+  const catCounts = {}; const reasonCounts = {}; const shortRemarksCounts = {};
+  rows.forEach(r=>{
+    if(r.category) catCounts[r.category] = (catCounts[r.category]||0)+1;
+    if(r.reason) reasonCounts[r.reason] = (reasonCounts[r.reason]||0)+1;
+    if(r.shortRemarks) shortRemarksCounts[r.shortRemarks] = (shortRemarksCounts[r.shortRemarks]||0)+1;
+    if(!r.uploadDate){
+      pending++;
+      const bucket = getAgingBucket(r);
+      if(bucket) aging[bucket]++;
+    } else if(r.date){
+      const hours = (r.uploadDate - r.date)/3600000;
+      if(hours < 48) match++; else breach++;
+    }
+  });
+  return {total: uniqueOrders.size, match, breach, pending, aging, catCounts, reasonCounts, shortRemarksCounts};
+}
+
+function fmtDate(d){
+  if(!d) return '—';
+  return d.toLocaleDateString('en-GB', {day:'2-digit', month:'short', year:'numeric'});
+}
+
+function renderBars(container, counts, pctTotal){
+  container.innerHTML = '';
+  const entries = Object.entries(counts).sort((a,b)=>b[1]-a[1]).slice(0,8);
+  const max = entries.length ? entries[0][1] : 1;
+  if(!entries.length){ container.innerHTML = '<div style="color:var(--muted); font-size:12px;">No data</div>'; return; }
+  entries.forEach(([name,count])=>{
+    const row = document.createElement('div');
+    row.className = 'bar-row';
+    const pctText = pctTotal ? ` <span style="color:var(--muted);">(${(count/pctTotal*100).toFixed(0)}%)</span>` : '';
+    row.innerHTML = `<div class="name" title="${name}">${name}</div>
+      <div class="bar-track"><div class="bar-fill" style="width:${(count/max*100).toFixed(0)}%"></div></div>
+      <div class="cnt">${count}${pctText}</div>`;
+    container.appendChild(row);
+  });
+}
+
+function renderBelt(aging){
+  const total = aging.b12+aging.b35+aging.b610+aging.b10p || 1;
+  const belt = document.getElementById('belt');
+  belt.innerHTML = '';
+  const segs = [
+    {n: aging.b12, color: 'var(--green)'},
+    {n: aging.b35, color: 'var(--blue)'},
+    {n: aging.b610, color: 'var(--amber)'},
+    {n: aging.b10p, color: 'var(--red)'},
+  ];
+  segs.forEach(s=>{
+    const div = document.createElement('div');
+    div.className = 'seg';
+    div.style.width = (s.n/total*100)+'%';
+    div.style.background = s.color;
+    belt.appendChild(div);
+  });
+
+  ['b12','b35','b610','b10p'].forEach(key=>{
+    const el = document.getElementById('stageBtn-'+key);
+    if(el) el.classList.toggle('active', agingFilter === key);
+  });
+  const note = document.getElementById('agingFilterNote');
+  if(agingFilter){
+    note.style.display = 'block';
+    document.getElementById('agingFilterLabel').textContent = AGING_LABELS[agingFilter];
+  } else {
+    note.style.display = 'none';
+  }
+}
+
+function renderTable(rows, filter){
+  const tbody = document.getElementById('tblBody');
+  const now = new Date();
+  const f = (filter||'').toLowerCase();
+  const filtered = rows.filter(r=>{
+    if(!f) return true;
+    return r.orderId.toLowerCase().includes(f) || r.reason.toLowerCase().includes(f) || r.category.toLowerCase().includes(f);
+  }).sort((a,b)=> (b.date?.getTime()||0) - (a.date?.getTime()||0));
+
+  tbody.innerHTML = '';
+  document.getElementById('emptyState').style.display = filtered.length ? 'none' : 'block';
+
+  filtered.forEach(r=>{
+    let statusBadge, ageCell;
+    if(!r.uploadDate){
+      const days = r.date ? Math.floor((now - r.date)/86400000) : null;
+      statusBadge = `<span class="badge pending">Pending</span>`;
+      ageCell = days!=null ? `${days}d old` : '—';
+    } else {
+      const hours = r.date ? (r.uploadDate - r.date)/3600000 : null;
+      const isMatch = hours!=null && hours < 48;
+      statusBadge = isMatch ? `<span class="badge match">SLA Match</span>` : `<span class="badge breach">SLA Breach</span>`;
+      ageCell = hours!=null ? `${Math.round(hours)} hrs` : '—';
+    }
+    const links = parseLinks(r.link);
+    let linkCell = '—';
+    if(links.length === 1){
+      linkCell = `<a class="linkcell mono" href="${links[0]}" target="_blank" rel="noopener">Open ↗</a>`;
+    } else if(links.length > 1){
+      linkCell = `<div class="link-list">` + links.map((u,i)=>
+        `<a class="linkcell mono" href="${u}" target="_blank" rel="noopener">Open ${i+1} ↗</a>`
+      ).join('') + `</div>`;
+    }
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="mono">${r.orderId || '—'}</td>
+      <td>${fmtDate(r.date)}</td>
+      <td>${fmtDate(r.uploadDate)}</td>
+      <td>${statusBadge}</td>
+      <td class="mono">${ageCell}</td>
+      <td>${r.category || '—'}</td>
+      <td>${r.reason || '—'}</td>
+      <td>${r.remarks || '—'}</td>
+      <td>${r.shortRemarks || '—'}</td>
+      <td>${linkCell}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function renderSlaChart(match, breach){
+  const box = document.getElementById('slaChartBox');
+  if(typeof Chart === 'undefined'){
+    // Chart.js didn't load (CDN blocked in this environment) — fall back to plain numbers
+    // instead of crashing the whole dashboard.
+    slaChartInstance = null;
+    box.innerHTML = `<div style="display:flex; flex-direction:column; justify-content:center; align-items:center; height:100%; gap:6px;">
+      <div style="color:var(--green); font-family:'Barlow Condensed',sans-serif; font-size:28px; font-weight:700;">${match} Match</div>
+      <div style="color:var(--red); font-family:'Barlow Condensed',sans-serif; font-size:28px; font-weight:700;">${breach} Breach</div>
+      <div style="color:var(--muted); font-size:11px;">Chart library failed to load</div>
+    </div>`;
+    return;
+  }
+  // Chart.js is available — make sure the canvas actually exists (it may have been
+  // replaced by the fallback markup above on an earlier render) before drawing on it.
+  if(slaChartInstance){ slaChartInstance.destroy(); slaChartInstance = null; }
+  if(!document.getElementById('slaChart')){
+    box.innerHTML = '<canvas id="slaChart"></canvas>';
+  }
+  const ctx = document.getElementById('slaChart');
+  slaChartInstance = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: ['SLA Match', 'SLA Breach'],
+      datasets: [{
+        data: [match, breach],
+        backgroundColor: ['#2bd4a0', '#ff5a5f'],
+        borderColor: '#161f2c',
+        borderWidth: 3,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom', labels: { color: '#eef2f6', font: { family: 'Inter', size: 12 } } }
+      },
+      cutout: '68%'
+    }
+  });
+}
+
+function monthKey(d){
+  if(!d) return null;
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
+}
+function monthLabel(key){
+  const [y,m] = key.split('-').map(Number);
+  return new Date(y, m-1, 1).toLocaleDateString('en-GB', {month:'short', year:'numeric'});
+}
+
+function populateMonthFilter(rows){
+  const sel = document.getElementById('monthFilter');
+  const prevVal = sel.value || 'all';
+  const keys = [...new Set(rows.map(r=>monthKey(r.date)).filter(Boolean))].sort();
+  sel.innerHTML = '<option value="all">All Months (Received)</option>';
+  keys.forEach(k=>{
+    const opt = document.createElement('option');
+    opt.value = k;
+    opt.textContent = monthLabel(k);
+    sel.appendChild(opt);
+  });
+  if([...sel.options].some(o=>o.value===prevVal)) sel.value = prevVal;
+}
+
+function getFilteredRows(){
+  const sel = document.getElementById('monthFilter');
+  const val = sel ? sel.value : 'all';
+  if(!val || val === 'all') return allRows;
+  return allRows.filter(r => monthKey(r.date) === val);
+}
+
+function dayKey(d){
+  if(!d) return null;
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+}
+function dayLabel(key){
+  const [y,m,d] = key.split('-').map(Number);
+  return new Date(y, m-1, d).toLocaleDateString('en-GB', {day:'2-digit', month:'short'});
+}
+
+function renderTrendChart(rows){
+  const receivedByDay = {}; const processedByDay = {};
+  rows.forEach(r=>{
+    const rk = dayKey(r.date);
+    if(rk) receivedByDay[rk] = (receivedByDay[rk]||0)+1;
+    const uk = dayKey(r.uploadDate);
+    if(uk) processedByDay[uk] = (processedByDay[uk]||0)+1;
+  });
+  const allDays = [...new Set([...Object.keys(receivedByDay), ...Object.keys(processedByDay)])].sort();
+  const labels = allDays.map(dayLabel);
+  const receivedData = allDays.map(k => receivedByDay[k] || 0);
+  const processedData = allDays.map(k => processedByDay[k] || 0);
+
+  const box = document.getElementById('trendChartBox');
+  if(typeof Chart === 'undefined'){
+    trendChartInstance = null;
+    box.innerHTML = `<div style="display:flex; justify-content:center; align-items:center; height:100%; color:var(--muted); font-size:12px;">Chart library failed to load</div>`;
+    return;
+  }
+  if(!allDays.length){
+    if(trendChartInstance){ trendChartInstance.destroy(); trendChartInstance = null; }
+    box.innerHTML = `<div style="display:flex; justify-content:center; align-items:center; height:100%; color:var(--muted); font-size:12px;">No data for this period</div>`;
+    return;
+  }
+  if(trendChartInstance){ trendChartInstance.destroy(); trendChartInstance = null; }
+  if(!document.getElementById('trendChart')){
+    box.innerHTML = '<canvas id="trendChart"></canvas>';
+  }
+  const ctx = document.getElementById('trendChart');
+  trendChartInstance = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Received',
+          data: receivedData,
+          borderColor: '#4fa3ff',
+          backgroundColor: 'rgba(79,163,255,0.12)',
+          tension: 0.3,
+          fill: true,
+          pointRadius: 3,
+        },
+        {
+          label: 'Processed',
+          data: processedData,
+          borderColor: '#2bd4a0',
+          backgroundColor: 'rgba(43,212,160,0.12)',
+          tension: 0.3,
+          fill: true,
+          pointRadius: 3,
+        }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { position: 'bottom', labels: { color: '#eef2f6', font: { family: 'Inter', size: 12 } } }
+      },
+      scales: {
+        x: { ticks: { color: '#8b98a8', font:{size:11} }, grid: { color: '#2a3644' } },
+        y: { beginAtZero: true, ticks: { color: '#8b98a8', font:{size:11}, precision:0 }, grid: { color: '#2a3644' } }
+      }
+    }
+  });
+}
+
+function renderAll(){
+  populateMonthFilter(allRows);
+  const rows = getFilteredRows();
+  const stats = computeStats(rows);
+  document.getElementById('kpiTotal').textContent = stats.total;
+  document.getElementById('kpiPending').textContent = stats.pending;
+  document.getElementById('kpiMatch').textContent = stats.match;
+  document.getElementById('kpiBreach').textContent = stats.breach;
+  const closed = stats.match + stats.breach;
+  document.getElementById('kpiSlaPct').textContent = closed ? Math.round(stats.match/closed*100)+'%' : '—';
+
+  document.getElementById('ag12').textContent = stats.aging.b12;
+  document.getElementById('ag35').textContent = stats.aging.b35;
+  document.getElementById('ag610').textContent = stats.aging.b610;
+  document.getElementById('ag10p').textContent = stats.aging.b10p;
+  renderBelt(stats.aging);
+
+  renderSlaChart(stats.match, stats.breach);
+  renderBars(document.getElementById('catBars'), stats.catCounts);
+  renderBars(document.getElementById('reasonBars'), stats.reasonCounts);
+  renderBars(document.getElementById('shortRemarksBars'), stats.shortRemarksCounts, stats.total);
+  renderTrendChart(rows);
+
+  const tableRows = agingFilter ? rows.filter(r => getAgingBucket(r) === agingFilter) : rows;
+  renderTable(tableRows, document.getElementById('search').value);
+}
+
+async function loadData(){
+  if(!sheetId){
+    setStatus('No source loaded yet — add a Google Sheet above using "+ Add source" (or paste a link and click Load).', true);
+    allRows = [];
+    renderAll();
+    return;
+  }
+  setStatus('Refreshing…');
+  try{
+    const table = await fetchTable(sheetId, sheetName);
+    allRows = buildRows(table);
+    renderAll();
+    if(allRows.length === 0 && table.rows && table.rows.length > 0){
+      // The sheet responded and has rows, but none of them matched — almost always
+      // means the column headers in the sheet don't match what the code expects.
+      const foundHeaders = table.cols.map(c => c.label || '(blank)').join(', ');
+      setStatus(
+        `Connected OK — sheet has ${table.rows.length} row(s), but 0 matched. ` +
+        `Expected columns like "Date" and "Order ID" not found. Headers detected in row 1: [${foundHeaders}]. ` +
+        `Check that your header row has exactly these names: Date, Order ID, Escalation Reason, Category, Warehouse Remarks, Link, Upload Date.`,
+        true
+      );
+    } else {
+      setStatus('Last updated ' + new Date().toLocaleTimeString('en-IN') + ' · ' + allRows.length + ' rows loaded');
+    }
+  } catch(err){
+    setStatus(err.message || 'Failed to load sheet.', true);
+  }
+}
+
+async function loadClientSummary(){
+  const statusEl = document.getElementById('clientSummaryStatus');
+  const tbody = document.getElementById('clientSummaryBody');
+  const emptyEl = document.getElementById('clientSummaryEmpty');
+
+  if(!SOURCES.length){
+    tbody.innerHTML = '';
+    emptyEl.style.display = 'block';
+    statusEl.textContent = '';
+    return;
+  }
+  emptyEl.style.display = 'none';
+  statusEl.textContent = 'Loading ' + SOURCES.length + ' client(s)…';
+
+  const results = await Promise.all(SOURCES.map(async (s)=>{
+    try{
+      const table = await fetchTable(s.id, s.tab);
+      const rows = buildRows(table);
+      const agg = {b12:0,b35:0,b610:0,b10p:0, totalPending:0, totalEsc:0};
+      const uniqueOrders = new Set();
+      rows.forEach(r=>{
+        if(r.orderId) uniqueOrders.add(r.orderId);
+        if(!r.uploadDate){
+          agg.totalPending++;
+          const bucket = getAgingBucket(r);
+          if(bucket) agg[bucket]++;
+        }
+      });
+      agg.totalEsc = uniqueOrders.size;
+      return { name: s.name, ok: true, agg };
+    } catch(err){
+      return { name: s.name, ok: false, error: err.message || 'Failed to load' };
+    }
+  }));
+
+  tbody.innerHTML = '';
+  results.forEach(r=>{
+    const tr = document.createElement('tr');
+    if(!r.ok){
+      tr.innerHTML = `
+        <td>${r.name}</td>
+        <td colspan="6" style="color:var(--red); font-size:12px;">${r.error}</td>
+      `;
+    } else {
+      const a = r.agg;
+      tr.innerHTML = `
+        <td>${r.name}</td>
+        <td class="mono">${a.b12}</td>
+        <td class="mono">${a.b35}</td>
+        <td class="mono">${a.b610}</td>
+        <td class="mono">${a.b10p}</td>
+        <td class="mono" style="font-weight:600;">${a.totalPending}</td>
+        <td class="mono">${a.totalEsc}</td>
+      `;
+    }
+    tbody.appendChild(tr);
+  });
+
+  statusEl.textContent = 'Last updated ' + new Date().toLocaleTimeString('en-IN');
+}
+
+document.getElementById('loadBtn').addEventListener('click', ()=>{
+  const url = document.getElementById('sheetUrl').value.trim();
+  const tab = document.getElementById('tabName').value.trim() || 'Escalation';
+  const id = url ? extractSheetId(url) : null;
+  if(url && !id){ setStatus('Could not read a sheet ID from that link.', true); return; }
+  if(id){
+    sheetId = id;
+    document.getElementById('sourceSelect').value = 'custom';
+  }
+  sheetName = tab;
+  loadData();
+});
+document.getElementById('refreshBtn').addEventListener('click', loadData);
+document.getElementById('search').addEventListener('input', (e)=>{
+  const rows = getFilteredRows();
+  const tableRows = agingFilter ? rows.filter(r => getAgingBucket(r) === agingFilter) : rows;
+  renderTable(tableRows, e.target.value);
+});
+document.getElementById('monthFilter').addEventListener('change', renderAll);
+
+document.getElementById('stages').addEventListener('click', (e)=>{
+  const stageEl = e.target.closest('.stage');
+  if(!stageEl) return;
+  const bucket = stageEl.dataset.bucket;
+  agingFilter = (agingFilter === bucket) ? null : bucket; // click again to clear
+  renderAll();
+});
+document.getElementById('agingFilterClear').addEventListener('click', (e)=>{
+  e.preventDefault();
+  agingFilter = null;
+  renderAll();
+});
+
+loadData();
+loadClientSummary();
+setInterval(loadData, 5*60*1000);
+setInterval(loadClientSummary, 5*60*1000);
+</script>
+</body>
+</html>
