@@ -51,6 +51,8 @@
     min-width: 260px;
   }
   .controls input:focus{ outline:2px solid var(--blue); outline-offset: 1px; }
+  .controls select{ color-scheme: dark; }
+  .controls select option{ background: var(--panel-2); color: var(--text); }
   button{
     background: var(--blue); color: #071018; border:none; font-weight:600;
     padding: 10px 16px; border-radius: 8px; cursor:pointer; font-size: 13px;
@@ -151,8 +153,11 @@
       <button class="btn-ghost" id="refreshBtn">↻ Refresh</button>
       <button class="btn-ghost" id="manageSourcesBtn">+ Add source</button>
       <button class="btn-ghost" id="shareLinkBtn">🔗 Copy Share Link</button>
-      <select id="monthFilter" style="background: var(--panel-2); border:1px solid var(--line); color: var(--text); padding: 9px 12px; border-radius: 8px; font-size: 13px; font-family:'Inter',sans-serif; min-width:150px;">
+      <select id="monthFilter" title="Master Filter — Month" style="background: var(--panel-2); border:1px solid var(--line); color: var(--text); padding: 9px 12px; border-radius: 8px; font-size: 13px; font-family:'Inter',sans-serif; min-width:150px;">
         <option value="all">All Months (Received)</option>
+      </select>
+      <select id="clientFilter" title="Master Filter — Client Name" style="background: var(--panel-2); border:1px solid var(--line); color: var(--text); padding: 9px 12px; border-radius: 8px; font-size: 13px; font-family:'Inter',sans-serif; min-width:170px;">
+        <option value="all">All Clients</option>
       </select>
     </div>
     <div id="status">Loading…</div>
@@ -419,7 +424,22 @@ function populateSourceSelect(){
   sel.appendChild(customOpt);
   if(prevVal && [...sel.options].some(o=>o.value===prevVal)) sel.value = prevVal;
 }
+function populateClientFilter(){
+  const sel = document.getElementById('clientFilter');
+  if(!sel) return;
+  const prevVal = sel.value || 'all';
+  sel.innerHTML = '<option value="all">All Clients</option>';
+  SOURCES.forEach((s)=>{
+    const opt = document.createElement('option');
+    opt.value = s.name;
+    opt.textContent = s.name;
+    sel.appendChild(opt);
+  });
+  if([...sel.options].some(o=>o.value===prevVal)) sel.value = prevVal;
+}
+
 populateSourceSelect();
+populateClientFilter();
 if(urlSourceApplied){
   document.getElementById('sourceSelect').value = 'custom';
   document.getElementById('tabName').value = sheetName;
@@ -433,6 +453,8 @@ document.getElementById('sourceSelect').addEventListener('change', (e)=>{
   sheetName = s.tab;
   document.getElementById('sheetUrl').value = '';
   document.getElementById('tabName').value = s.tab;
+  const clientSel = document.getElementById('clientFilter');
+  if(clientSel && [...clientSel.options].some(o=>o.value===s.name)) clientSel.value = s.name;
   loadData();
 });
 
@@ -473,6 +495,7 @@ document.getElementById('saveSourceBtn').addEventListener('click', ()=>{
 
   SOURCES = [...DEFAULT_SOURCES, ...custom];
   populateSourceSelect();
+  populateClientFilter();
   const newIndex = SOURCES.findIndex(s => s.name === name && s.id === id);
   document.getElementById('sourceSelect').value = newIndex;
   document.getElementById('newSourceName').value = '';
@@ -493,6 +516,7 @@ document.getElementById('removeSourceBtn').addEventListener('click', ()=>{
   saveCustomSources(custom);
   SOURCES = [...DEFAULT_SOURCES, ...custom];
   populateSourceSelect();
+  populateClientFilter();
   if(SOURCES[0]){
     sheetId = SOURCES[0].id; sheetName = SOURCES[0].tab;
     document.getElementById('sourceSelect').value = 0;
@@ -794,11 +818,13 @@ function populateMonthFilter(rows){
   const sel = document.getElementById('monthFilter');
   const prevVal = sel.value || 'all';
   const keys = [...new Set(rows.map(r=>monthKey(r.date)).filter(Boolean))].sort();
-  sel.innerHTML = '<option value="all">All Months (Received)</option>';
+  sel.innerHTML = '<option value="all" style="background:#1c2734; color:#eef2f6;">All Months (Received)</option>';
   keys.forEach(k=>{
     const opt = document.createElement('option');
     opt.value = k;
     opt.textContent = monthLabel(k);
+    opt.style.background = '#1c2734';
+    opt.style.color = '#eef2f6';
     sel.appendChild(opt);
   });
   if([...sel.options].some(o=>o.value===prevVal)) sel.value = prevVal;
@@ -950,19 +976,29 @@ async function loadClientSummary(){
   const tbody = document.getElementById('clientSummaryBody');
   const emptyEl = document.getElementById('clientSummaryEmpty');
 
-  if(!SOURCES.length){
+  const clientSel = document.getElementById('clientFilter');
+  const clientVal = clientSel ? clientSel.value : 'all';
+  const sourcesToLoad = (clientVal && clientVal !== 'all') ? SOURCES.filter(s => s.name === clientVal) : SOURCES;
+
+  if(!sourcesToLoad.length){
     tbody.innerHTML = '';
     emptyEl.style.display = 'block';
     statusEl.textContent = '';
     return;
   }
   emptyEl.style.display = 'none';
-  statusEl.textContent = 'Loading ' + SOURCES.length + ' client(s)…';
+  statusEl.textContent = 'Loading ' + sourcesToLoad.length + ' client(s)…';
 
-  const results = await Promise.all(SOURCES.map(async (s)=>{
+  const monthSel = document.getElementById('monthFilter');
+  const monthVal = monthSel ? monthSel.value : 'all';
+
+  const results = await Promise.all(sourcesToLoad.map(async (s)=>{
     try{
       const table = await fetchTable(s.id, s.tab);
-      const rows = buildRows(table);
+      let rows = buildRows(table);
+      if(monthVal && monthVal !== 'all'){
+        rows = rows.filter(r => monthKey(r.date) === monthVal);
+      }
       const agg = {b12:0,b35:0,b610:0,b10p:0, totalPending:0, totalEsc:0};
       const uniqueOrders = new Set();
       let slaMatch=0, slaBreach=0, slaPending=0;
@@ -1017,7 +1053,7 @@ async function loadClientSummary(){
   const numEmpty = document.getElementById('slaNumEmpty');
   pctBody.innerHTML = '';
   numBody.innerHTML = '';
-  if(!SOURCES.length){
+  if(!sourcesToLoad.length){
     pctEmpty.style.display = 'block';
     numEmpty.style.display = 'block';
   } else {
@@ -1075,7 +1111,26 @@ document.getElementById('search').addEventListener('input', (e)=>{
   const tableRows = agingFilter ? rows.filter(r => getAgingBucket(r) === agingFilter) : rows;
   renderTable(tableRows, e.target.value);
 });
-document.getElementById('monthFilter').addEventListener('change', renderAll);
+document.getElementById('monthFilter').addEventListener('change', ()=>{
+  renderAll();
+  loadClientSummary();
+});
+document.getElementById('clientFilter').addEventListener('change', (e)=>{
+  const val = e.target.value;
+  if(val !== 'all'){
+    const s = SOURCES.find(s => s.name === val);
+    if(s){
+      sheetId = s.id;
+      sheetName = s.tab;
+      document.getElementById('sheetUrl').value = '';
+      document.getElementById('tabName').value = s.tab;
+      const sIdx = SOURCES.findIndex(x => x.name === s.name && x.id === s.id);
+      if(sIdx >= 0) document.getElementById('sourceSelect').value = sIdx;
+      loadData();
+    }
+  }
+  loadClientSummary();
+});
 
 document.getElementById('stages').addEventListener('click', (e)=>{
   const stageEl = e.target.closest('.stage');
