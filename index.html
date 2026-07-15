@@ -307,6 +307,50 @@
   </div>
 </section>
 
+<section class="table-card" style="margin-top:22px;">
+  <div class="table-head">
+    <h2>SLA Performance — % Wise</h2>
+    <span id="slaPctStatus" style="font-size:12px; color:var(--muted);"></span>
+  </div>
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>Client Name</th>
+          <th>SLA Match %</th>
+          <th>SLA Breach %</th>
+          <th>Pending %</th>
+          <th>Total Escalations</th>
+        </tr>
+      </thead>
+      <tbody id="slaPctBody"></tbody>
+    </table>
+    <div class="empty-state" id="slaPctEmpty" style="display:none;">No sources configured. Add sources above to see SLA performance.</div>
+  </div>
+</section>
+
+<section class="table-card" style="margin-top:22px;">
+  <div class="table-head">
+    <h2>SLA Performance — Number Wise</h2>
+    <span id="slaNumStatus" style="font-size:12px; color:var(--muted);"></span>
+  </div>
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>Client Name</th>
+          <th>SLA Match</th>
+          <th>SLA Breach</th>
+          <th>Pending</th>
+          <th>Total Escalations</th>
+        </tr>
+      </thead>
+      <tbody id="slaNumBody"></tbody>
+    </table>
+    <div class="empty-state" id="slaNumEmpty" style="display:none;">No sources configured. Add sources above to see SLA performance.</div>
+  </div>
+</section>
+
 <footer>Auto-refreshes every 5 minutes · Built for management review · Requires sheet sharing set to "Anyone with the link – Viewer"</footer>
 
 <script>
@@ -921,16 +965,23 @@ async function loadClientSummary(){
       const rows = buildRows(table);
       const agg = {b12:0,b35:0,b610:0,b10p:0, totalPending:0, totalEsc:0};
       const uniqueOrders = new Set();
+      let slaMatch=0, slaBreach=0, slaPending=0;
       rows.forEach(r=>{
         if(r.orderId) uniqueOrders.add(r.orderId);
         if(!r.uploadDate){
           agg.totalPending++;
+          slaPending++;
           const bucket = getAgingBucket(r);
           if(bucket) agg[bucket]++;
+        } else if(r.date){
+          // SLA rule: Upload Date - Received Date <= 48 hrs => Match, > 48 hrs => Breach
+          const hours = (r.uploadDate - r.date)/3600000;
+          if(hours <= 48) slaMatch++; else slaBreach++;
         }
       });
       agg.totalEsc = uniqueOrders.size;
-      return { name: s.name, ok: true, agg };
+      const slaTotal = slaMatch + slaBreach + slaPending;
+      return { name: s.name, ok: true, agg, sla: { match: slaMatch, breach: slaBreach, pending: slaPending, total: slaTotal } };
     } catch(err){
       return { name: s.name, ok: false, error: err.message || 'Failed to load' };
     }
@@ -958,6 +1009,50 @@ async function loadClientSummary(){
     }
     tbody.appendChild(tr);
   });
+
+  // SLA Performance — % Wise and Number Wise tables
+  const pctBody = document.getElementById('slaPctBody');
+  const numBody = document.getElementById('slaNumBody');
+  const pctEmpty = document.getElementById('slaPctEmpty');
+  const numEmpty = document.getElementById('slaNumEmpty');
+  pctBody.innerHTML = '';
+  numBody.innerHTML = '';
+  if(!SOURCES.length){
+    pctEmpty.style.display = 'block';
+    numEmpty.style.display = 'block';
+  } else {
+    pctEmpty.style.display = 'none';
+    numEmpty.style.display = 'none';
+    results.forEach(r=>{
+      const trPct = document.createElement('tr');
+      const trNum = document.createElement('tr');
+      if(!r.ok){
+        trPct.innerHTML = `<td>${r.name}</td><td colspan="4" style="color:var(--red); font-size:12px;">${r.error}</td>`;
+        trNum.innerHTML = `<td>${r.name}</td><td colspan="4" style="color:var(--red); font-size:12px;">${r.error}</td>`;
+      } else {
+        const s = r.sla;
+        const pct = (n)=> s.total ? (n/s.total*100).toFixed(0)+'%' : '—';
+        trPct.innerHTML = `
+          <td>${r.name}</td>
+          <td class="mono" style="color:var(--green);">${pct(s.match)}</td>
+          <td class="mono" style="color:var(--red);">${pct(s.breach)}</td>
+          <td class="mono" style="color:var(--amber);">${pct(s.pending)}</td>
+          <td class="mono" style="font-weight:600;">${s.total}</td>
+        `;
+        trNum.innerHTML = `
+          <td>${r.name}</td>
+          <td class="mono" style="color:var(--green);">${s.match}</td>
+          <td class="mono" style="color:var(--red);">${s.breach}</td>
+          <td class="mono" style="color:var(--amber);">${s.pending}</td>
+          <td class="mono" style="font-weight:600;">${s.total}</td>
+        `;
+      }
+      pctBody.appendChild(trPct);
+      numBody.appendChild(trNum);
+    });
+  }
+  document.getElementById('slaPctStatus').textContent = 'Last updated ' + new Date().toLocaleTimeString('en-IN');
+  document.getElementById('slaNumStatus').textContent = 'Last updated ' + new Date().toLocaleTimeString('en-IN');
 
   statusEl.textContent = 'Last updated ' + new Date().toLocaleTimeString('en-IN');
 }
