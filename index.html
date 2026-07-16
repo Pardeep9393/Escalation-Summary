@@ -156,9 +156,6 @@
       <select id="monthFilter" title="Master Filter — Month" style="background: var(--panel-2); border:1px solid var(--line); color: var(--text); padding: 9px 12px; border-radius: 8px; font-size: 13px; font-family:'Inter',sans-serif; min-width:150px;">
         <option value="all">All Months (Received)</option>
       </select>
-      <select id="clientFilter" title="Master Filter — Client Name" style="background: var(--panel-2); border:1px solid var(--line); color: var(--text); padding: 9px 12px; border-radius: 8px; font-size: 13px; font-family:'Inter',sans-serif; min-width:170px;">
-        <option value="all">All Clients</option>
-      </select>
     </div>
     <div id="status">Loading…</div>
     <div id="addSourcePanel" style="display:none; margin-top:10px; background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:12px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
@@ -315,7 +312,12 @@
 <section class="table-card" style="margin-top:22px;">
   <div class="table-head">
     <h2>SLA Performance — % Wise</h2>
-    <span id="slaPctStatus" style="font-size:12px; color:var(--muted);"></span>
+    <div style="display:flex; align-items:center; gap:10px;">
+      <select id="slaPctMonthFilter" title="Month Filter" style="background: var(--panel-2); border:1px solid var(--line); color: var(--text); padding: 7px 10px; border-radius: 8px; font-size: 12px; font-family:'Inter',sans-serif; min-width:140px;">
+        <option value="all">All Months (Received)</option>
+      </select>
+      <span id="slaPctStatus" style="font-size:12px; color:var(--muted);"></span>
+    </div>
   </div>
   <div class="table-scroll">
     <table>
@@ -337,7 +339,12 @@
 <section class="table-card" style="margin-top:22px;">
   <div class="table-head">
     <h2>SLA Performance — Number Wise</h2>
-    <span id="slaNumStatus" style="font-size:12px; color:var(--muted);"></span>
+    <div style="display:flex; align-items:center; gap:10px;">
+      <select id="slaNumMonthFilter" title="Month Filter" style="background: var(--panel-2); border:1px solid var(--line); color: var(--text); padding: 7px 10px; border-radius: 8px; font-size: 12px; font-family:'Inter',sans-serif; min-width:140px;">
+        <option value="all">All Months (Received)</option>
+      </select>
+      <span id="slaNumStatus" style="font-size:12px; color:var(--muted);"></span>
+    </div>
   </div>
   <div class="table-scroll">
     <table>
@@ -424,22 +431,7 @@ function populateSourceSelect(){
   sel.appendChild(customOpt);
   if(prevVal && [...sel.options].some(o=>o.value===prevVal)) sel.value = prevVal;
 }
-function populateClientFilter(){
-  const sel = document.getElementById('clientFilter');
-  if(!sel) return;
-  const prevVal = sel.value || 'all';
-  sel.innerHTML = '<option value="all">All Clients</option>';
-  SOURCES.forEach((s)=>{
-    const opt = document.createElement('option');
-    opt.value = s.name;
-    opt.textContent = s.name;
-    sel.appendChild(opt);
-  });
-  if([...sel.options].some(o=>o.value===prevVal)) sel.value = prevVal;
-}
-
 populateSourceSelect();
-populateClientFilter();
 if(urlSourceApplied){
   document.getElementById('sourceSelect').value = 'custom';
   document.getElementById('tabName').value = sheetName;
@@ -453,8 +445,6 @@ document.getElementById('sourceSelect').addEventListener('change', (e)=>{
   sheetName = s.tab;
   document.getElementById('sheetUrl').value = '';
   document.getElementById('tabName').value = s.tab;
-  const clientSel = document.getElementById('clientFilter');
-  if(clientSel && [...clientSel.options].some(o=>o.value===s.name)) clientSel.value = s.name;
   loadData();
 });
 
@@ -818,16 +808,16 @@ function populateMonthFilter(rows){
   const sel = document.getElementById('monthFilter');
   const prevVal = sel.value || 'all';
   const keys = [...new Set(rows.map(r=>monthKey(r.date)).filter(Boolean))].sort();
-  sel.innerHTML = '<option value="all" style="background:#1c2734; color:#eef2f6;">All Months (Received)</option>';
-  keys.forEach(k=>{
-    const opt = document.createElement('option');
-    opt.value = k;
-    opt.textContent = monthLabel(k);
-    opt.style.background = '#1c2734';
-    opt.style.color = '#eef2f6';
-    sel.appendChild(opt);
+  const optionsHtml = keys.map(k=>{
+    const label = monthLabel(k);
+    return `<option value="${k}" style="background:#1c2734; color:#eef2f6;">${label}</option>`;
+  }).join('');
+  [sel, document.getElementById('slaPctMonthFilter'), document.getElementById('slaNumMonthFilter')].forEach(s=>{
+    if(!s) return;
+    const val = s.value || prevVal;
+    s.innerHTML = '<option value="all" style="background:#1c2734; color:#eef2f6;">All Months (Received)</option>' + optionsHtml;
+    if([...s.options].some(o=>o.value===val)) s.value = val;
   });
-  if([...sel.options].some(o=>o.value===prevVal)) sel.value = prevVal;
 }
 
 function getFilteredRows(){
@@ -976,9 +966,7 @@ async function loadClientSummary(){
   const tbody = document.getElementById('clientSummaryBody');
   const emptyEl = document.getElementById('clientSummaryEmpty');
 
-  const clientSel = document.getElementById('clientFilter');
-  const clientVal = clientSel ? clientSel.value : 'all';
-  const sourcesToLoad = (clientVal && clientVal !== 'all') ? SOURCES.filter(s => s.name === clientVal) : SOURCES;
+  const sourcesToLoad = SOURCES;
 
   if(!sourcesToLoad.length){
     tbody.innerHTML = '';
@@ -1111,27 +1099,27 @@ document.getElementById('search').addEventListener('input', (e)=>{
   const tableRows = agingFilter ? rows.filter(r => getAgingBucket(r) === agingFilter) : rows;
   renderTable(tableRows, e.target.value);
 });
-document.getElementById('monthFilter').addEventListener('change', ()=>{
+function syncMonthFilters(val){
+  ['monthFilter','slaPctMonthFilter','slaNumMonthFilter'].forEach(id=>{
+    const s = document.getElementById(id);
+    if(s && s.value !== val && [...s.options].some(o=>o.value===val)) s.value = val;
+  });
+}
+document.getElementById('monthFilter').addEventListener('change', (e)=>{
+  syncMonthFilters(e.target.value);
   renderAll();
   loadClientSummary();
 });
-document.getElementById('clientFilter').addEventListener('change', (e)=>{
-  const val = e.target.value;
-  if(val !== 'all'){
-    const s = SOURCES.find(s => s.name === val);
-    if(s){
-      sheetId = s.id;
-      sheetName = s.tab;
-      document.getElementById('sheetUrl').value = '';
-      document.getElementById('tabName').value = s.tab;
-      const sIdx = SOURCES.findIndex(x => x.name === s.name && x.id === s.id);
-      if(sIdx >= 0) document.getElementById('sourceSelect').value = sIdx;
-      loadData();
-    }
-  }
+document.getElementById('slaPctMonthFilter').addEventListener('change', (e)=>{
+  syncMonthFilters(e.target.value);
+  renderAll();
   loadClientSummary();
 });
-
+document.getElementById('slaNumMonthFilter').addEventListener('change', (e)=>{
+  syncMonthFilters(e.target.value);
+  renderAll();
+  loadClientSummary();
+});
 document.getElementById('stages').addEventListener('click', (e)=>{
   const stageEl = e.target.closest('.stage');
   if(!stageEl) return;
