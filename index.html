@@ -653,7 +653,25 @@ function getAgingBucket(r){
 }
 const AGING_LABELS = {b12:'1–2 days', b35:'3–5 days', b610:'6–10 days', b10p:'> 10 days'};
 
-function computeStats(rows){
+// Same Order ID can appear more than once in the sheet (re-escalated, re-logged, etc).
+// "Total Escalations" has always counted unique Order IDs — this makes every other
+// count (Pending, Match, Breach, aging buckets, category/reason breakdowns) use the
+// same de-duplicated set, so all numbers agree with each other everywhere.
+function dedupeByOrderId(rows){
+  const seen = new Set();
+  const result = [];
+  rows.forEach(r=>{
+    if(r.orderId){
+      if(seen.has(r.orderId)) return;
+      seen.add(r.orderId);
+    }
+    result.push(r); // rows without an Order ID can't be deduped meaningfully — keep them
+  });
+  return result;
+}
+
+function computeStats(rowsIn){
+  const rows = dedupeByOrderId(rowsIn);
   const uniqueOrders = new Set(rows.map(r=>r.orderId).filter(Boolean));
   let match=0, breach=0, pending=0;
   const aging = {b12:0,b35:0,b610:0,b10p:0};
@@ -1037,6 +1055,7 @@ async function loadClientSummary(){
       if(monthVal && monthVal !== 'all'){
         rows = rows.filter(r => monthKey(r.date) === monthVal);
       }
+      rows = dedupeByOrderId(rows);
       const agg = {b12:0,b35:0,b610:0,b10p:0, totalPending:0, totalEsc:0};
       const uniqueOrders = new Set();
       let slaMatch=0, slaBreach=0, slaPending=0;
