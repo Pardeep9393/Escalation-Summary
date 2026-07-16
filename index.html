@@ -156,6 +156,9 @@
       <select id="monthFilter" title="Master Filter — Month" style="background: var(--panel-2); border:1px solid var(--line); color: var(--text); padding: 9px 12px; border-radius: 8px; font-size: 13px; font-family:'Inter',sans-serif; min-width:150px;">
         <option value="all">All Months (Received)</option>
       </select>
+      <select id="clientFilter" title="Master Filter — Client" style="background: var(--panel-2); border:1px solid var(--line); color: var(--text); padding: 9px 12px; border-radius: 8px; font-size: 13px; font-family:'Inter',sans-serif; min-width:150px;">
+        <option value="all">All Clients</option>
+      </select>
     </div>
     <div id="status">Loading…</div>
     <div id="addSourcePanel" style="display:none; margin-top:10px; background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:12px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
@@ -412,6 +415,7 @@ let urlSourceApplied = false;
 })();
 let allRows = [];
 let agingFilter = null; // 'b12' | 'b35' | 'b610' | 'b10p' | null
+let monthKeySet = new Set(); // accumulates month keys seen across ALL loaded sources, so the month filter isn't limited to whichever single client is currently open in the top selector
 let slaChartInstance = null;
 let trendChartInstance = null;
 
@@ -431,7 +435,21 @@ function populateSourceSelect(){
   sel.appendChild(customOpt);
   if(prevVal && [...sel.options].some(o=>o.value===prevVal)) sel.value = prevVal;
 }
+function populateClientFilter(){
+  const sel = document.getElementById('clientFilter');
+  if(!sel) return;
+  const prevVal = sel.value || 'all';
+  sel.innerHTML = '<option value="all">All Clients</option>';
+  SOURCES.forEach(s=>{
+    const opt = document.createElement('option');
+    opt.value = s.name;
+    opt.textContent = s.name;
+    sel.appendChild(opt);
+  });
+  if([...sel.options].some(o=>o.value===prevVal)) sel.value = prevVal;
+}
 populateSourceSelect();
+populateClientFilter();
 if(urlSourceApplied){
   document.getElementById('sourceSelect').value = 'custom';
   document.getElementById('tabName').value = sheetName;
@@ -805,9 +823,16 @@ function monthLabel(key){
 }
 
 function populateMonthFilter(rows){
+  // Merge this batch of rows' month keys into the running set, then rebuild the
+  // dropdown from the full set — this way months from EVERY client that has been
+  // loaded (not just whichever single client is open in the top selector) show up.
+  rows.forEach(r=>{
+    const k = monthKey(r.date);
+    if(k) monthKeySet.add(k);
+  });
   const sel = document.getElementById('monthFilter');
   const prevVal = sel.value || 'all';
-  const keys = [...new Set(rows.map(r=>monthKey(r.date)).filter(Boolean))].sort();
+  const keys = [...monthKeySet].sort();
   const optionsHtml = keys.map(k=>{
     const label = monthLabel(k);
     return `<option value="${k}" style="background:#1c2734; color:#eef2f6;">${label}</option>`;
@@ -966,7 +991,9 @@ async function loadClientSummary(){
   const tbody = document.getElementById('clientSummaryBody');
   const emptyEl = document.getElementById('clientSummaryEmpty');
 
-  const sourcesToLoad = SOURCES;
+  const clientSel = document.getElementById('clientFilter');
+  const clientVal = clientSel ? clientSel.value : 'all';
+  const sourcesToLoad = (clientVal && clientVal !== 'all') ? SOURCES.filter(s => s.name === clientVal) : SOURCES;
 
   if(!sourcesToLoad.length){
     tbody.innerHTML = '';
@@ -984,6 +1011,10 @@ async function loadClientSummary(){
     try{
       const table = await fetchTable(s.id, s.tab);
       let rows = buildRows(table);
+      // Feed this source's month keys into the shared month filter set so months that
+      // only exist for THIS client (not the one currently open in the top selector)
+      // still show up as selectable options.
+      populateMonthFilter(rows.length ? rows : []);
       if(monthVal && monthVal !== 'all'){
         rows = rows.filter(r => monthKey(r.date) === monthVal);
       }
@@ -1118,6 +1149,9 @@ document.getElementById('slaPctMonthFilter').addEventListener('change', (e)=>{
 document.getElementById('slaNumMonthFilter').addEventListener('change', (e)=>{
   syncMonthFilters(e.target.value);
   renderAll();
+  loadClientSummary();
+});
+document.getElementById('clientFilter').addEventListener('change', ()=>{
   loadClientSummary();
 });
 document.getElementById('stages').addEventListener('click', (e)=>{
